@@ -28,6 +28,15 @@ interface QueueItem {
 	depth: number;
 }
 
+interface TableData {
+	selector: string;
+	type: 'table' | 'list' | 'grid' | 'card';
+	headers?: string[];
+	rows?: any[][];
+	textContent: string;
+	elementCount: number;
+}
+
 // Utility functions
 function page_hash(url: string): string {
 	// Simple hash function for URL - lowercase and hash
@@ -80,6 +89,106 @@ async function navigate_to_page(stagehand: Stagehand, current_path: PathObject[]
 	
 	// For now, just wait a bit to simulate navigation
 	await stagehand.page.waitForTimeout(1000);
+}
+
+async function extractTabularData(stagehand: Stagehand): Promise<TableData[]> {
+	const tabularData: TableData[] = [];
+	const seenSelectors = new Set<string>();
+	
+	try {
+		// Find container elements that hold collections of data
+		const containers = await stagehand.page.observe({
+			instruction: "Find the main container elements that hold collections of similar items. Look for elements that contain multiple similar child elements like tables, lists, grids, or repeated card-like structures. Focus on the parent containers, not individual items."
+		});
+		
+		containers.forEach((container, index) => {
+			const description = container.description.toLowerCase();
+			let type: 'table' | 'list' | 'grid' | 'card' = 'card';
+			
+			// Determine the type based on description and selector
+			if (description.includes('table') || container.selector.includes('table')) {
+				type = 'table';
+			} else if (description.includes('list') || 
+					   container.selector.includes('ul') || 
+					   container.selector.includes('ol')) {
+				type = 'list';
+			} else if (description.includes('grid') || 
+					   description.includes('row') || 
+					   description.includes('collection')) {
+				type = 'grid';
+			}
+			
+			// Only add if it's likely a container with multiple items
+			if (description.includes('multiple') || 
+				description.includes('list of') || 
+				description.includes('collection') ||
+				description.includes('table') ||
+				description.includes('grid') ||
+				description.includes('items') ||
+				description.includes('cards')) {
+				
+				// Check for duplicates
+				if (!seenSelectors.has(container.selector)) {
+					seenSelectors.add(container.selector);
+					tabularData.push({
+						selector: container.selector,
+						type: type,
+						textContent: container.description,
+						elementCount: 1
+					});
+				}
+			}
+		});
+		
+		// Also look specifically for data collection containers
+		const dataCollections = await stagehand.page.observe({
+			instruction: "Find elements that represent collections of data like email lists, product catalogs, user lists, dashboard widgets, or any container that holds multiple similar data items. Focus on the container, not the individual items."
+		});
+		
+		dataCollections.forEach((element, index) => {
+			const description = element.description.toLowerCase();
+			
+			// Skip if already captured
+			if (!seenSelectors.has(element.selector)) {
+				let type: 'table' | 'list' | 'grid' | 'card' = 'card';
+				
+				if (description.includes('table')) type = 'table';
+				else if (description.includes('list')) type = 'list';
+				else if (description.includes('grid') || description.includes('row')) type = 'grid';
+				
+				// Only add if it's clearly a collection container
+				if (description.includes('list of') || 
+					description.includes('collection') ||
+					description.includes('multiple') ||
+					description.includes('items') ||
+					description.includes('emails') ||
+					description.includes('products') ||
+					description.includes('users') ||
+					description.includes('posts') ||
+					description.includes('articles')) {
+					
+					seenSelectors.add(element.selector);
+					tabularData.push({
+						selector: element.selector,
+						type: type,
+						textContent: element.description,
+						elementCount: 1
+					});
+				}
+			}
+		});
+		
+		console.info(`Found ${tabularData.length} unique data collection containers:`);
+		tabularData.forEach((data, index) => {
+			console.info(`  ${index + 1}. ${data.type} container - ${data.selector}`);
+			console.info(`     Description: ${data.textContent}`);
+		});
+		
+	} catch (error) {
+		console.error('Error extracting tabular data:', error);
+	}
+	
+	return tabularData;
 }
 
 async function main() {
@@ -143,10 +252,28 @@ async function main() {
 		
 		console.info(`Now at path: ${JSON.stringify(current_path)}`);
 		
-		// TODO: Implement the rest of the crawling logic
-		// - Extract tables/lists (READ operations)
-		// - Extract form elements (CREATE, UPDATE, DELETE operations)
-		// - Extract clickables and handle navigation
+		// Extract tabular data (READ operations)
+		console.info('Extracting tabular data for READ operations...');
+		const tabularData = await extractTabularData(stagehand);
+		
+		// Add READ operations for each tabular data element
+		tabularData.forEach((data, index) => {
+			crud_operations.push({
+				operation: 'READ',
+				type: data.type,
+				selector: data.selector,
+				elementCount: data.elementCount,
+				hasHeaders: !!data.headers,
+				hasRows: !!data.rows,
+				textContent: data.textContent.substring(0, 200) + (data.textContent.length > 200 ? '...' : ''),
+				path: current_path
+			});
+		});
+		
+		console.info(`Found ${crud_operations.length} READ operations`);
+		
+		// TODO: Extract form elements (CREATE, UPDATE, DELETE operations)
+		// TODO: Extract clickables and handle navigation
 		
 		// For now, just wait a bit to simulate processing
 		await page.waitForTimeout(2000);
