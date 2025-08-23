@@ -28,6 +28,14 @@ interface QueueItem {
 	depth: number;
 }
 
+interface ClickableElement {
+	selector: string;
+	type: 'link' | 'button' | 'other';
+	text: string;
+	href?: string;
+	description: string;
+}
+
 interface TableData {
 	selector: string;
 	type: 'table' | 'list' | 'grid' | 'card';
@@ -56,8 +64,6 @@ interface FormData {
 	inputs: FormInput[];
 	textContent: string;
 	elementCount: number;
-	hasSubmitButton: boolean;
-	submitButtonText?: string;
 }
 
 // Utility functions
@@ -105,13 +111,45 @@ async function login(stagehand: Stagehand, url: string, username: string, passwo
 	console.info("Login completed successfully!");
 }
 
-async function navigate_to_page(stagehand: Stagehand, current_path: PathObject[], new_path: PathObject[]): Promise<void> {
-	// TODO: Implement navigation logic
-	// This should handle going back to previous pages and clicking buttons to reach the specified path
-	console.info(`Navigating from path ${JSON.stringify(current_path)} to ${JSON.stringify(new_path)}`);
+async function navigate_to_page(stagehand: Stagehand, rootUrl: string, new_path: PathObject[]): Promise<void> {
+	console.info(`Navigating to path ${JSON.stringify(new_path)}`);
 	
-	// For now, just wait a bit to simulate navigation
-	await stagehand.page.waitForTimeout(1000);
+	// If new_path is empty, go to the root page
+	if (new_path.length === 0) {
+		console.info('Target is root page, navigating to root');
+		await stagehand.page.goto(rootUrl);
+		await stagehand.page.waitForTimeout(2000);
+		return;
+	}
+	
+	// Always start from the root page to ensure consistent starting point
+	console.info(`Starting from root page: ${rootUrl}`);
+	await stagehand.page.goto(rootUrl);
+	await stagehand.page.waitForTimeout(2000);
+	
+	// Navigate through each step in the path
+	for (let i = 0; i < new_path.length; i++) {
+		const pathStep = new_path[i];
+		console.info(`Step ${i + 1}/${new_path.length}: Clicking on element ${pathStep.intra_page_path}`);
+		
+		try {
+			// Click on the element
+			await stagehand.page.act(`Click on the element with selector "${pathStep.intra_page_path}"`);
+			await stagehand.page.waitForTimeout(2000); // Wait for navigation/loading
+			
+			// If it's a new link, wait a bit more for the page to load
+			if (pathStep.is_new_link) {
+				await stagehand.page.waitForTimeout(3000);
+			}
+			
+			console.info(`Successfully navigated to step ${i + 1}, current URL: ${stagehand.page.url()}`);
+		} catch (error) {
+			console.error(`Failed to click on element ${pathStep.intra_page_path}:`, error);
+			throw error; // Fail the navigation if any step fails
+		}
+	}
+	
+	console.info(`Navigation completed. Final URL: ${stagehand.page.url()}`);
 }
 
 async function extractTabularData(stagehand: Stagehand): Promise<TableData[]> {
@@ -214,15 +252,35 @@ async function extractTabularData(stagehand: Stagehand): Promise<TableData[]> {
 	return tabularData;
 }
 
-async function extractFormData(stagehand: Stagehand): Promise<FormData[]> {
+async function extractFormData(stagehand: Stagehand, existingFormSelectors?: Set<string>): Promise<FormData[]> {
 	// TODO: Consider replacing form type interpretation with LLM
 	const formData: FormData[] = [];
 	const seenSelectors = new Set<string>();
+	const usedInputSelectors = new Set<string>(); // Track which input selectors have been used
+	
+	// If we have existing form selectors, add them to seenSelectors to prevent duplication
+	if (existingFormSelectors) {
+		existingFormSelectors.forEach(selector => seenSelectors.add(selector));
+		console.info(`Excluding ${existingFormSelectors.size} previously extracted form selectors`);
+	}
 	
 	try {
+		// Check if a modal is currently open by looking for modal-like elements
+		const modalElements = await stagehand.page.observe({
+			instruction: "Find any modal, popup, or dialog elements that are currently visible and displayed on the page. Look for elements with modal-like styling (overlays, popups, dialogs) that are not hidden. Only return elements that are actually visible and active on the page."
+		});
+		
+		const isModalOpen = modalElements.length > 0;
+		if (isModalOpen) {
+			console.info(`Modal detected (${modalElements.length} modal elements) - will focus on modal content and ignore background forms`);
+		} else {
+			console.info('No modal detected - extracting all forms on the page');
+		}
 		// Find form elements and form-like containers
 		const forms = await stagehand.page.observe({
-			instruction: "Find all form elements and form-like containers that contain input fields, textareas, select dropdowns, checkboxes, radio buttons, or submit buttons. Look for both actual <form> elements and div containers that function as forms."
+			instruction: isModalOpen 
+				? "Find form elements and form-like containers within the currently open modal or popup. Look for input fields, textareas, select dropdowns, checkboxes, radio buttons, or submit buttons within the modal content. Ignore any forms in the background."
+				: "Find all form elements and form-like containers that contain input fields, textareas, select dropdowns, checkboxes, radio buttons, or submit buttons. Look for both actual <form> elements and div containers that function as forms. This includes search boxes."
 		});
 		
 		for (const form of forms) {
@@ -269,6 +327,12 @@ async function extractFormData(stagehand: Stagehand): Promise<FormData[]> {
 				const inputDesc = input.description.toLowerCase();
 				const selector = input.selector;
 				
+				// Skip if this input selector has already been used in another form
+				if (usedInputSelectors.has(selector)) {
+					console.info(`Skipping input ${selector} - already used in another form`);
+					continue;
+				}
+				
 				// Determine input type
 				let inputType: FormInput['type'] = 'text';
 				if (inputDesc.includes('email') || selector.includes('email')) {
@@ -285,7 +349,7 @@ async function extractFormData(stagehand: Stagehand): Promise<FormData[]> {
 					inputType = 'search';
 				} else if (inputDesc.includes('textarea') || selector.includes('textarea')) {
 					inputType = 'textarea';
-				} else if (inputDesc.includes('select') || selector.includes('select') || inputDesc.includes('dropdown')) {
+				} else if (inputDesc.includes('select') || selector.includes('select') || inputDesc.includes('dropdown') || inputDesc.includes('menu')) {
 					inputType = 'select';
 				} else if (inputDesc.includes('checkbox')) {
 					inputType = 'checkbox';
@@ -325,11 +389,10 @@ async function extractFormData(stagehand: Stagehand): Promise<FormData[]> {
 					label: hasLabel ? 'Has label' : undefined,
 					options: options.length > 0 ? options : undefined
 				});
+				
+				// Mark this input selector as used
+				usedInputSelectors.add(selector);
 			}
-			
-			// Check if form has a submit button
-			const hasSubmitButton = inputs.some(input => input.type === 'submit');
-			const submitButton = inputs.find(input => input.type === 'submit');
 			
 			// Only add forms that have inputs
 			if (inputs.length > 0) {
@@ -339,16 +402,14 @@ async function extractFormData(stagehand: Stagehand): Promise<FormData[]> {
 					type: formType,
 					inputs: inputs,
 					textContent: form.description,
-					elementCount: inputs.length,
-					hasSubmitButton: hasSubmitButton,
-					submitButtonText: submitButton?.description
+					elementCount: inputs.length
 				});
 			}
 		}
 		
 		// Also look for standalone input groups that might not be in traditional forms
 		const inputGroups = await stagehand.page.observe({
-			instruction: "Find groups of input elements that work together as a form-like interface, even if they're not wrapped in a <form> tag. Look for search bars, filter panels, or other input collections."
+			instruction: "Find groups of input elements that work together as a form-like interface, even if they're not wrapped in a <form> tag. Look for search bars, filter panels, dropdown menus, select elements, or other input collections. Specifically look for search functionality - any input field with 'search' in the placeholder, nearby search buttons, or elements that allow users to search or filter content. Include individual search input fields even if they're not part of a larger form group."
 		});
 		
 		for (const group of inputGroups) {
@@ -373,6 +434,12 @@ async function extractFormData(stagehand: Stagehand): Promise<FormData[]> {
 					const inputDesc = input.description.toLowerCase();
 					const selector = input.selector;
 					
+					// Skip if this input selector has already been used in another form
+					if (usedInputSelectors.has(selector)) {
+						console.info(`Skipping input ${selector} - already used in another form`);
+						continue;
+					}
+					
 					let inputType: FormInput['type'] = 'text';
 					if (inputDesc.includes('search')) inputType = 'search';
 					else if (inputDesc.includes('email')) inputType = 'email';
@@ -385,6 +452,9 @@ async function extractFormData(stagehand: Stagehand): Promise<FormData[]> {
 						description: input.description,
 						required: inputDesc.includes('required')
 					});
+					
+					// Mark this input selector as used
+					usedInputSelectors.add(selector);
 				}
 				
 				if (groupInputs.length > 0) {
@@ -399,9 +469,116 @@ async function extractFormData(stagehand: Stagehand): Promise<FormData[]> {
 						type: groupType,
 						inputs: groupInputs,
 						textContent: group.description,
-						elementCount: groupInputs.length,
-						hasSubmitButton: groupInputs.some(input => input.type === 'submit'),
-						submitButtonText: groupInputs.find(input => input.type === 'submit')?.description
+						elementCount: groupInputs.length
+					});
+				}
+			}
+		}
+		
+		// Also look specifically for dropdown and select elements
+		const dropdownElements = await stagehand.page.observe({
+			instruction: "Find dropdown menus, select elements, and any interactive elements that show a list of options when clicked. Look for elements that might be used for filtering, sorting, or selecting from a list of choices."
+		});
+		
+		for (const dropdown of dropdownElements) {
+			const description = dropdown.description.toLowerCase();
+			const selector = dropdown.selector;
+			
+			// Skip if already captured
+			if (seenSelectors.has(selector)) continue;
+			
+			// Only consider elements that are clearly dropdowns or selects
+			if (description.includes('dropdown') || 
+				description.includes('select') || 
+				description.includes('menu') ||
+				description.includes('options') ||
+				description.includes('choices') ||
+				selector.includes('select') ||
+				selector.includes('dropdown')) {
+				
+				seenSelectors.add(selector);
+				
+				let formType: FormData['type'] = 'filter';
+				if (description.includes('sort')) formType = 'filter';
+				else if (description.includes('category')) formType = 'filter';
+				else if (description.includes('language')) formType = 'settings';
+				else if (description.includes('country')) formType = 'filter';
+				
+				formData.push({
+					selector: selector,
+					type: formType,
+					inputs: [{
+						selector: selector,
+						type: 'select',
+						description: dropdown.description,
+						required: description.includes('required')
+					}],
+					textContent: dropdown.description,
+					elementCount: 1
+				});
+			}
+		}
+		
+		// Also look specifically for search-related elements that might have been missed
+		const searchElements = await stagehand.page.observe({
+			instruction: "Find any search-related elements that might not have been captured yet. Look for input fields with 'search' in the placeholder text, input fields near search buttons, or any elements that allow users to search or filter content. Include individual search input fields, search forms, and any container that contains search functionality."
+		});
+		
+		for (const searchElement of searchElements) {
+			const description = searchElement.description.toLowerCase();
+			const selector = searchElement.selector;
+			
+			// Skip if already captured
+			if (seenSelectors.has(selector)) continue;
+			
+			// Check if it's search-related
+			const isSearchRelated = description.includes('search') || 
+								   description.includes('find') || 
+								   description.includes('filter') ||
+								   selector.includes('search') ||
+								   description.includes('placeholder') && description.includes('search');
+			
+			if (isSearchRelated) {
+				// Extract inputs from this search element
+				const searchInputs: FormInput[] = [];
+				const searchInputElements = await stagehand.page.observe({
+					instruction: `Find all input elements within the element at selector "${selector}".`
+				});
+				
+				for (const input of searchInputElements) {
+					const inputDesc = input.description.toLowerCase();
+					const selector = input.selector;
+					
+					// Skip if this input selector has already been used in another form
+					if (usedInputSelectors.has(selector)) {
+						console.info(`Skipping input ${selector} - already used in another form`);
+						continue;
+					}
+					
+					let inputType: FormInput['type'] = 'search';
+					if (inputDesc.includes('submit') || inputDesc.includes('button')) {
+						inputType = 'submit';
+					}
+					
+					searchInputs.push({
+						selector: input.selector,
+						type: inputType,
+						description: input.description,
+						required: inputDesc.includes('required')
+					});
+					
+					// Mark this input selector as used
+					usedInputSelectors.add(selector);
+				}
+				
+				if (searchInputs.length > 0) {
+					seenSelectors.add(selector);
+					formData.push({
+						selector: selector,
+						type: 'search',
+						inputs: searchInputs,
+						textContent: searchElement.description,
+						elementCount: searchInputs.length
 					});
 				}
 			}
@@ -412,7 +589,6 @@ async function extractFormData(stagehand: Stagehand): Promise<FormData[]> {
 			console.info(`  ${index + 1}. ${form.type} form - ${form.selector}`);
 			console.info(`     Description: ${form.textContent}`);
 			console.info(`     Inputs: ${form.inputs.length} (${form.inputs.map(i => i.type).join(', ')})`);
-			console.info(`     Has submit button: ${form.hasSubmitButton}`);
 		});
 		
 	} catch (error) {
@@ -420,6 +596,226 @@ async function extractFormData(stagehand: Stagehand): Promise<FormData[]> {
 	}
 	
 	return formData;
+}
+
+async function extractClickableElements(stagehand: Stagehand, formInputSelectors?: Set<string>): Promise<ClickableElement[]> {
+	const clickableElements: ClickableElement[] = [];
+	const seenSelectors = new Set<string>();
+	
+	try {
+		// Find all clickable elements excluding form elements (inputs, buttons within forms, etc.)
+		const clickables = await stagehand.page.observe({
+			instruction: "Find all clickable elements on the page including links, buttons, and interactive elements that respond to clicks. Look for elements that might open modals, dropdowns, new pages, or trigger actions. EXCLUDE form elements like input fields, submit buttons, form buttons, and any elements within form containers."
+		});
+		
+		for (const element of clickables) {
+			const description = element.description.toLowerCase();
+			const selector = element.selector;
+			
+			// Skip if already captured
+			if (seenSelectors.has(selector)) continue;
+			
+			// Determine basic element type
+			let type: ClickableElement['type'] = 'other';
+			let href: string | undefined;
+			
+			// Check for links
+			if (selector.includes('a[href') || description.includes('link') || description.includes('href')) {
+				type = 'link';
+				
+				// Extract href if available
+				if (description.includes('href=')) {
+					const hrefMatch = description.match(/href=["']([^"']+)["']/);
+					if (hrefMatch) {
+						href = hrefMatch[1];
+					}
+				}
+			}
+			// Check for buttons
+			else if (selector.includes('button') || description.includes('button')) {
+				type = 'button';
+			}
+			
+			// Extract text content
+			let text = element.description;
+			if (description.includes('text=')) {
+				const textMatch = description.match(/text=["']([^"']+)["']/);
+				if (textMatch) {
+					text = textMatch[1];
+				}
+			}
+			
+			// Filter out logout buttons and similar session-ending elements
+			const isLogoutElement = description.includes('logout') || 
+									description.includes('log out') || 
+									description.includes('sign out') || 
+									description.includes('signout') ||
+									text.toLowerCase().includes('logout') ||
+									text.toLowerCase().includes('log out') ||
+									text.toLowerCase().includes('sign out') ||
+									text.toLowerCase().includes('signout');
+			
+			// Filter out form input elements that were already captured
+			const isFormInputElement = formInputSelectors && formInputSelectors.has(selector);
+			
+			// Only add elements that are clearly clickable and not logout or form input elements
+			if (!isLogoutElement && !isFormInputElement && (type !== 'other' || description.includes('click') || description.includes('button') || description.includes('link'))) {
+				seenSelectors.add(selector);
+				clickableElements.push({
+					selector: selector,
+					type: type,
+					text: text,
+					href: href,
+					description: element.description
+				});
+			} else if (isLogoutElement) {
+				console.info(`Skipping logout element: ${text} (${selector})`);
+			} else if (isFormInputElement) {
+				console.info(`Skipping form input element: ${text} (${selector})`);
+			}
+		}
+		
+
+		
+		console.info(`Found ${clickableElements.length} unique clickable elements:`);
+		clickableElements.forEach((element, index) => {
+			console.info(`  ${index + 1}. ${element.type} - ${element.selector}`);
+			console.info(`     Text: ${element.text}`);
+		});
+		
+	} catch (error) {
+		console.error('Error extracting clickable elements:', error);
+	}
+	
+	return clickableElements;
+}
+
+async function handleModalInteractions(stagehand: Stagehand, clickableElements: ClickableElement[], existingFormSelectors?: Set<string>): Promise<any[]> {
+	const modalOperations: any[] = [];
+	
+	try {
+		// Test all clickable elements to see which ones open modals
+		const modalTriggers = clickableElements;
+		
+		console.info(`Found ${modalTriggers.length} modal triggers to test`);
+		
+		for (const trigger of modalTriggers) {
+			console.info(`Testing modal trigger: ${trigger.text} (${trigger.selector})`);
+			
+			try {
+				// Click on the modal trigger
+				await stagehand.page.act(`Click on the element with selector "${trigger.selector}"`);
+				await stagehand.page.waitForTimeout(2000); // Wait for modal to open
+				
+				// Look for modal content
+				const modalContent = await stagehand.page.observe({
+					instruction: "Find modal or popup content that appeared after clicking. Look for dialog boxes, popups, overlays, or any content that appeared on top of the page."
+				});
+				
+				if (modalContent.length > 0) {
+					console.info(`Modal opened successfully: ${modalContent.length} elements found`);
+					
+					// Extract form data from the modal, excluding previously extracted forms
+					const modalFormData = await extractFormData(stagehand, existingFormSelectors);
+					
+					// TODO: Allow for multiple levels of recursion and clicking links within modals
+					// const modalClickables = await extractClickableElements(stagehand);
+					
+					// Add modal operations
+					modalOperations.push({
+						trigger: {
+							selector: trigger.selector,
+							text: trigger.text,
+							type: trigger.type
+						},
+						modalContent: modalContent.map(content => ({
+							selector: content.selector,
+							description: content.description
+						})),
+						forms: modalFormData,
+						// TODO: Add clickables when implementing modal recursion
+						// clickables: modalClickables,
+						operation: 'MODAL_INTERACTION'
+					});
+					
+					// Try to close the modal
+					const closeButtons = await stagehand.page.observe({
+						instruction: "Find close buttons, X buttons, or cancel buttons in the modal to close it."
+					});
+					
+					if (closeButtons.length > 0) {
+						await stagehand.page.act(`Click on the element with selector "${closeButtons[0].selector}"`);
+						await stagehand.page.waitForTimeout(1000);
+					} else {
+						// Try pressing Escape key
+						await stagehand.page.keyboard.press('Escape');
+						await stagehand.page.waitForTimeout(1000);
+					}
+				} else {
+					console.info('No modal content detected');
+				}
+				
+			} catch (error) {
+				console.error(`Error testing modal trigger ${trigger.selector}:`, error);
+			}
+		}
+		
+		console.info(`Completed modal interaction testing. Found ${modalOperations.length} successful modal operations`);
+		
+	} catch (error) {
+		console.error('Error handling modal interactions:', error);
+	}
+	
+	return modalOperations;
+}
+
+async function testNavigationElements(stagehand: Stagehand, clickableElements: ClickableElement[]): Promise<ClickableElement[]> {
+	const navigationElements: ClickableElement[] = [];
+	
+	try {
+		// Get current URL to compare against
+		const currentUrl = stagehand.page.url();
+		console.info(`Testing navigation elements. Current URL: ${currentUrl}`);
+		
+		// Test all clickable elements to see which ones navigate
+		const potentialNavElements = clickableElements;
+		
+		console.info(`Found ${potentialNavElements.length} potential navigation elements to test`);
+		
+		for (const element of potentialNavElements) {
+			console.info(`Testing element: ${element.text} (${element.selector})`);
+			
+			try {
+				// Click on the element
+				await stagehand.page.act(`Click on the element with selector "${element.selector}"`);
+				await stagehand.page.waitForTimeout(2000); // Wait for potential navigation
+				
+				// Check if URL changed
+				const newUrl = stagehand.page.url();
+				
+				if (newUrl !== currentUrl) {
+					console.info(`✓ Navigation detected: ${currentUrl} → ${newUrl}`);
+					navigationElements.push(element);
+					
+					// Go back to original page for next test
+					await navigate_to_page(stagehand, currentUrl, []);
+				} else {
+					console.info(`✗ No navigation: URL remained ${currentUrl}`);
+				}
+				
+			} catch (error) {
+				console.error(`Error testing element ${element.selector}:`, error);
+				// Continue with next element
+			}
+		}
+		
+		console.info(`Found ${navigationElements.length} actual navigation elements`);
+		
+	} catch (error) {
+		console.error('Error testing navigation elements:', error);
+	}
+	
+	return navigationElements;
 }
 
 async function main() {
@@ -457,15 +853,16 @@ async function main() {
 	
 	// Initialize path tracking
 	const initial_path: PathObject[] = []; // Empty path for the post-login page
+	const rootUrl = page.url(); // Store the root URL (post-login page)
 	const queue: QueueItem[] = [{
 		path: initial_path,
 		depth: 0
 	}];
 	
-	let current_path: PathObject[] = [];
-	const seen_set = new Set([page_hash(page.url())]); // The initial seen set is just the post-login page
+	let current_path: PathObject[] = initial_path;
+	const seen_set = new Set([page_hash(rootUrl)]); // The initial seen set is just the post-login page
 	
-	console.info(`Initial page URL: ${page.url()}`);
+	console.info(`Root page URL: ${rootUrl}`);
 	console.info(`Initial seen set: ${Array.from(seen_set)}`);
 	
 	// Main crawling loop
@@ -478,7 +875,7 @@ async function main() {
 		console.info(`Processing queue item at depth ${depth}`);
 		
 		// Navigate to the specified path
-		navigate_to_page(stagehand, current_path, new_path);
+		await navigate_to_page(stagehand, rootUrl, new_path);
 		current_path = new_path;
 		
 		console.info(`Now at path: ${JSON.stringify(current_path)}`);
@@ -524,8 +921,6 @@ async function main() {
 				type: form.type,
 				selector: form.selector,
 				elementCount: form.elementCount,
-				hasSubmitButton: form.hasSubmitButton,
-				submitButtonText: form.submitButtonText,
 				inputs: form.inputs.map(input => ({
 					type: input.type,
 					required: input.required,
@@ -540,10 +935,83 @@ async function main() {
 		
 		console.info(`Found ${formData.length} form operations`);
 		
+		// Collect all form input selectors to avoid double-clicking form elements
+		const formInputSelectors = new Set<string>();
+		formData.forEach(form => {
+			form.inputs.forEach(input => {
+				if (input.selector) {
+					formInputSelectors.add(input.selector);
+				}
+			});
+		});
+		
+		// Extract clickable elements (for navigation and interaction)
+		console.info('Extracting clickable elements...');
+		const clickableElements = await extractClickableElements(stagehand, formInputSelectors);
+		
+		console.info(`Found ${clickableElements.length} clickable elements`);
+		
+		// Print all clickable elements
+		console.info('=== CLICKABLE ELEMENTS ===');
+		clickableElements.forEach((element, index) => {
+			console.info(`${index + 1}. Type: ${element.type}`);
+			console.info(`   Selector: ${element.selector}`);
+			console.info(`   Text: ${element.text}`);
+			console.info(`   Description: ${element.description}`);
+			if (element.href) {
+				console.info(`   Href: ${element.href}`);
+			}
+			console.info('');
+		});
+		
+		// Test clickable elements to see which ones actually navigate to new pages
+		const navigationElements = await testNavigationElements(stagehand, clickableElements);
+		
+		// Create modal elements list (clickable elements - navigation elements)
+		const modalElements = clickableElements.filter(element => 
+			!navigationElements.some(navElement => navElement.selector === element.selector)
+		);
+		console.info(`Found ${modalElements.length} potential modal elements`);
+		
+		// Collect all form selectors to prevent duplication in modal extraction
+		const existingFormSelectors = new Set<string>();
+		formData.forEach(form => {
+			existingFormSelectors.add(form.selector);
+		});
+		
+		// Handle modal interactions
+		const modalOperations = await handleModalInteractions(stagehand, modalElements, existingFormSelectors);
+		modalOperations.forEach(operation => {
+			crud_operations.push(operation);
+		});
+		
 		console.info('=== CRUD OPERATIONS JSON ===');
 		console.info(JSON.stringify(crud_operations, null, 2));
 		
-		// TODO: Extract clickables and handle navigation
+		/*
+		// Add navigation elements to queue
+		if (depth < config.maxDepth) {
+			// Add new paths to the queue
+			for (const element of navigationElements) {
+				const newPath: PathObject[] = [...current_path, {
+					intra_page_path: element.selector,
+					is_new_link: true
+				}];
+				
+				// Create a hash for the new path to avoid duplicates
+				const pathHash = page_hash(JSON.stringify(newPath));
+				
+				if (!seen_set.has(pathHash)) {
+					seen_set.add(pathHash);
+					queue.unshift({
+						path: newPath,
+						depth: depth + 1
+					});
+					console.info(`Added new path to queue: ${element.text} (${element.selector})`);
+				}
+			}
+		}
+		*/
 		
 	}
 	

@@ -34,12 +34,12 @@ def login():
 @app.route('/home')
 @login_required
 def home():
-    # Sample email data
-    all_emails = [
+    # Get emails from session or use default
+    all_emails = session.get('emails', [
         {'id': 1, 'subject': 'You owe a bill', 'content': 'Please pay your outstanding balance of $150.00 by the end of this month.'},
         {'id': 2, 'subject': 'Meeting reminder', 'content': 'Don\'t forget about the team meeting tomorrow at 2 PM in Conference Room A.'},
         {'id': 3, 'subject': 'Project update', 'content': 'The quarterly project review has been scheduled for next Friday. Please prepare your reports.'}
-    ]
+    ])
     
     # Get search query from URL parameters
     search_query = request.args.get('search', '').strip()
@@ -55,6 +55,36 @@ def home():
         emails = all_emails
     
     return render_template('home.html', emails=emails, search_query=search_query)
+
+@app.route('/compose_email', methods=['POST'])
+@login_required
+def compose_email():
+    subject = request.form.get('subject', '').strip()
+    body = request.form.get('body', '').strip()
+    
+    if subject and body:
+        # Get current emails from session
+        emails = session.get('emails', [
+            {'id': 1, 'subject': 'You owe a bill', 'content': 'Please pay your outstanding balance of $150.00 by the end of this month.'},
+            {'id': 2, 'subject': 'Meeting reminder', 'content': 'Don\'t forget about the team meeting tomorrow at 2 PM in Conference Room A.'},
+            {'id': 3, 'subject': 'Project update', 'content': 'The quarterly project review has been scheduled for next Friday. Please prepare your reports.'}
+        ])
+        
+        # Find the next available ID
+        next_id = max([email['id'] for email in emails]) + 1 if emails else 1
+        
+        # Add new email to the list
+        new_email = {
+            'id': next_id,
+            'subject': subject,
+            'content': body
+        }
+        emails.append(new_email)
+        
+        # Save back to session
+        session['emails'] = emails
+    
+    return redirect(url_for('home'))
 
 @app.route('/starred')
 @login_required
