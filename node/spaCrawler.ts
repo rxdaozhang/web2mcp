@@ -37,6 +37,29 @@ interface TableData {
 	elementCount: number;
 }
 
+interface FormInput {
+	selector: string;
+	type: 'text' | 'email' | 'password' | 'number' | 'tel' | 'url' | 'search' | 'textarea' | 'select' | 'checkbox' | 'radio' | 'file' | 'date' | 'datetime-local' | 'time' | 'month' | 'week' | 'color' | 'range' | 'hidden' | 'submit' | 'button' | 'reset' | 'image';
+	name?: string;
+	id?: string;
+	placeholder?: string;
+	label?: string;
+	required?: boolean;
+	value?: string;
+	options?: string[]; // For select elements
+	description: string;
+}
+
+interface FormData {
+	selector: string;
+	type: 'form' | 'search' | 'login' | 'registration' | 'contact' | 'settings' | 'checkout' | 'feedback' | 'newsletter' | 'filter' | 'delete' | 'remove' | 'unsubscribe' | 'other';
+	inputs: FormInput[];
+	textContent: string;
+	elementCount: number;
+	hasSubmitButton: boolean;
+	submitButtonText?: string;
+}
+
 // Utility functions
 function page_hash(url: string): string {
 	// Simple hash function for URL - lowercase and hash
@@ -191,11 +214,219 @@ async function extractTabularData(stagehand: Stagehand): Promise<TableData[]> {
 	return tabularData;
 }
 
+async function extractFormData(stagehand: Stagehand): Promise<FormData[]> {
+	// TODO: Consider replacing form type interpretation with LLM
+	const formData: FormData[] = [];
+	const seenSelectors = new Set<string>();
+	
+	try {
+		// Find form elements and form-like containers
+		const forms = await stagehand.page.observe({
+			instruction: "Find all form elements and form-like containers that contain input fields, textareas, select dropdowns, checkboxes, radio buttons, or submit buttons. Look for both actual <form> elements and div containers that function as forms."
+		});
+		
+		for (const form of forms) {
+			const description = form.description.toLowerCase();
+			
+			// Skip if already captured
+			if (seenSelectors.has(form.selector)) continue;
+			
+			// Determine form type based on description and context
+			let formType: FormData['type'] = 'other';
+			if (description.includes('login') || description.includes('sign in') || description.includes('signin')) {
+				formType = 'login';
+			} else if (description.includes('register') || description.includes('sign up') || description.includes('signup')) {
+				formType = 'registration';
+			} else if (description.includes('search') || description.includes('find')) {
+				formType = 'search';
+			} else if (description.includes('contact') || description.includes('message') || description.includes('support')) {
+				formType = 'contact';
+			} else if (description.includes('settings') || description.includes('preferences') || description.includes('profile')) {
+				formType = 'settings';
+			} else if (description.includes('checkout') || description.includes('payment') || description.includes('order')) {
+				formType = 'checkout';
+			} else if (description.includes('feedback') || description.includes('review') || description.includes('rating')) {
+				formType = 'feedback';
+			} else if (description.includes('newsletter') || description.includes('subscribe')) {
+				formType = 'newsletter';
+			} else if (description.includes('filter') || description.includes('sort') || description.includes('refine')) {
+				formType = 'filter';
+			} else if (description.includes('delete') || description.includes('remove') || description.includes('trash')) {
+				formType = 'delete';
+			} else if (description.includes('unsubscribe') || description.includes('cancel subscription')) {
+				formType = 'unsubscribe';
+			}
+			
+			// Extract inputs within this form
+			const inputs: FormInput[] = [];
+			
+			// Look for input elements within this form
+			const formInputs = await stagehand.page.observe({
+				instruction: `Find all input elements, textareas, select dropdowns, checkboxes, radio buttons, and buttons within the element at selector "${form.selector}". Focus on elements that users can interact with to provide data.`
+			});
+			
+			for (const input of formInputs) {
+				const inputDesc = input.description.toLowerCase();
+				const selector = input.selector;
+				
+				// Determine input type
+				let inputType: FormInput['type'] = 'text';
+				if (inputDesc.includes('email') || selector.includes('email')) {
+					inputType = 'email';
+				} else if (inputDesc.includes('password') || selector.includes('password')) {
+					inputType = 'password';
+				} else if (inputDesc.includes('number') || selector.includes('number')) {
+					inputType = 'number';
+				} else if (inputDesc.includes('phone') || selector.includes('tel') || selector.includes('phone')) {
+					inputType = 'tel';
+				} else if (inputDesc.includes('url') || selector.includes('url')) {
+					inputType = 'url';
+				} else if (inputDesc.includes('search') || selector.includes('search')) {
+					inputType = 'search';
+				} else if (inputDesc.includes('textarea') || selector.includes('textarea')) {
+					inputType = 'textarea';
+				} else if (inputDesc.includes('select') || selector.includes('select') || inputDesc.includes('dropdown')) {
+					inputType = 'select';
+				} else if (inputDesc.includes('checkbox')) {
+					inputType = 'checkbox';
+				} else if (inputDesc.includes('radio')) {
+					inputType = 'radio';
+				} else if (inputDesc.includes('file') || selector.includes('file')) {
+					inputType = 'file';
+				} else if (inputDesc.includes('date') || selector.includes('date')) {
+					inputType = 'date';
+				} else if (inputDesc.includes('time') || selector.includes('time')) {
+					inputType = 'time';
+				} else if (inputDesc.includes('submit') || inputDesc.includes('button') || selector.includes('submit') || selector.includes('button')) {
+					inputType = 'submit';
+				} else if (inputDesc.includes('hidden')) {
+					inputType = 'hidden';
+				}
+				
+				// Extract additional input properties
+				const isRequired = inputDesc.includes('required') || inputDesc.includes('mandatory');
+				const hasPlaceholder = inputDesc.includes('placeholder') || inputDesc.includes('hint');
+				const hasLabel = inputDesc.includes('label') || inputDesc.includes('title');
+				
+				// For select elements, try to extract options
+				let options: string[] = [];
+				if (inputType === 'select') {
+					// This would require additional observation to get the actual options
+					// For now, we'll note that it's a select element
+					options = [];
+				}
+				
+				inputs.push({
+					selector: input.selector,
+					type: inputType,
+					description: input.description,
+					required: isRequired,
+					placeholder: hasPlaceholder ? 'Has placeholder' : undefined,
+					label: hasLabel ? 'Has label' : undefined,
+					options: options.length > 0 ? options : undefined
+				});
+			}
+			
+			// Check if form has a submit button
+			const hasSubmitButton = inputs.some(input => input.type === 'submit');
+			const submitButton = inputs.find(input => input.type === 'submit');
+			
+			// Only add forms that have inputs
+			if (inputs.length > 0) {
+				seenSelectors.add(form.selector);
+				formData.push({
+					selector: form.selector,
+					type: formType,
+					inputs: inputs,
+					textContent: form.description,
+					elementCount: inputs.length,
+					hasSubmitButton: hasSubmitButton,
+					submitButtonText: submitButton?.description
+				});
+			}
+		}
+		
+		// Also look for standalone input groups that might not be in traditional forms
+		const inputGroups = await stagehand.page.observe({
+			instruction: "Find groups of input elements that work together as a form-like interface, even if they're not wrapped in a <form> tag. Look for search bars, filter panels, or other input collections."
+		});
+		
+		for (const group of inputGroups) {
+			const description = group.description.toLowerCase();
+			
+			// Skip if already captured or if it's likely part of a form we already found
+			if (seenSelectors.has(group.selector)) continue;
+			
+			// Only consider groups that contain multiple inputs or are clearly form-like
+			if (description.includes('input') || 
+				description.includes('search') || 
+				description.includes('filter') ||
+				description.includes('form')) {
+				
+				// Extract inputs from this group (similar logic as above)
+				const groupInputs: FormInput[] = [];
+				const groupInputElements = await stagehand.page.observe({
+					instruction: `Find all input elements within the element at selector "${group.selector}".`
+				});
+				
+				for (const input of groupInputElements) {
+					const inputDesc = input.description.toLowerCase();
+					const selector = input.selector;
+					
+					let inputType: FormInput['type'] = 'text';
+					if (inputDesc.includes('search')) inputType = 'search';
+					else if (inputDesc.includes('email')) inputType = 'email';
+					else if (inputDesc.includes('password')) inputType = 'password';
+					else if (inputDesc.includes('submit') || inputDesc.includes('button')) inputType = 'submit';
+					
+					groupInputs.push({
+						selector: input.selector,
+						type: inputType,
+						description: input.description,
+						required: inputDesc.includes('required')
+					});
+				}
+				
+				if (groupInputs.length > 0) {
+					seenSelectors.add(group.selector);
+					
+					let groupType: FormData['type'] = 'other';
+					if (description.includes('search')) groupType = 'search';
+					else if (description.includes('filter')) groupType = 'filter';
+					
+					formData.push({
+						selector: group.selector,
+						type: groupType,
+						inputs: groupInputs,
+						textContent: group.description,
+						elementCount: groupInputs.length,
+						hasSubmitButton: groupInputs.some(input => input.type === 'submit'),
+						submitButtonText: groupInputs.find(input => input.type === 'submit')?.description
+					});
+				}
+			}
+		}
+		
+		console.info(`Found ${formData.length} unique form containers:`);
+		formData.forEach((form, index) => {
+			console.info(`  ${index + 1}. ${form.type} form - ${form.selector}`);
+			console.info(`     Description: ${form.textContent}`);
+			console.info(`     Inputs: ${form.inputs.length} (${form.inputs.map(i => i.type).join(', ')})`);
+			console.info(`     Has submit button: ${form.hasSubmitButton}`);
+		});
+		
+	} catch (error) {
+		console.error('Error extracting form data:', error);
+	}
+	
+	return formData;
+}
+
 async function main() {
 	// Initialize Stagehand
 	const stagehand = new Stagehand({
 		env: config.environment as "LOCAL" | "BROWSERBASE", // Environment to run in: LOCAL or BROWSERBASE
-		verbose: 2
+		// verbose: 2
 	});
 
 	// Initialize the stagehand instance
@@ -253,7 +484,7 @@ async function main() {
 		console.info(`Now at path: ${JSON.stringify(current_path)}`);
 		
 		// Extract tabular data (READ operations)
-		console.info('Extracting tabular data for READ operations...');
+		console.info('Extracting tabular data...');
 		const tabularData = await extractTabularData(stagehand);
 		
 		// Add READ operations for each tabular data element
@@ -272,11 +503,48 @@ async function main() {
 		
 		console.info(`Found ${crud_operations.length} READ operations`);
 		
-		// TODO: Extract form elements (CREATE, UPDATE, DELETE operations)
+		// Extract form data (CREATE, UPDATE operations)
+		console.info('Extracting form data...');
+		const formData = await extractFormData(stagehand);
+		
+		// Add CRUD operations for each form
+		formData.forEach((form, index) => {
+			// Determine operation type based on form type
+			let operation: 'READ' | 'CREATE' | 'UPDATE' | 'DELETE' = 'CREATE';
+			if (form.type === 'settings') {
+				operation = 'UPDATE';
+			} else if (form.type === 'search' || form.type === 'filter') {
+				operation = 'READ';
+			} else if (form.type === 'delete' || form.type === 'remove' || form.type === 'unsubscribe') {
+				operation = 'DELETE';
+			}
+			
+			crud_operations.push({
+				operation: operation,
+				type: form.type,
+				selector: form.selector,
+				elementCount: form.elementCount,
+				hasSubmitButton: form.hasSubmitButton,
+				submitButtonText: form.submitButtonText,
+				inputs: form.inputs.map(input => ({
+					type: input.type,
+					required: input.required,
+					placeholder: input.placeholder,
+					label: input.label,
+					options: input.options
+				})),
+				textContent: form.textContent.substring(0, 200) + (form.textContent.length > 200 ? '...' : ''),
+				path: current_path
+			});
+		});
+		
+		console.info(`Found ${formData.length} form operations`);
+		
+		console.info('=== CRUD OPERATIONS JSON ===');
+		console.info(JSON.stringify(crud_operations, null, 2));
+		
 		// TODO: Extract clickables and handle navigation
 		
-		// For now, just wait a bit to simulate processing
-		await page.waitForTimeout(2000);
 	}
 	
 	console.info("Crawling completed!");

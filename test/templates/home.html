@@ -88,6 +88,54 @@
             color: #333;
             margin-bottom: 20px;
         }
+        .search-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+        .search-form {
+            display: flex;
+            gap: 10px;
+            max-width: 600px;
+        }
+        .search-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        .search-input:focus {
+            border-color: #007bff;
+        }
+        .search-button {
+            padding: 12px 24px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .search-button:hover {
+            background-color: #0056b3;
+        }
+        .search-results {
+            margin-top: 10px;
+            color: #666;
+            font-style: italic;
+        }
+        .no-results {
+            text-align: center;
+            color: #666;
+            font-style: italic;
+            margin-top: 40px;
+        }
     </style>
 </head>
 <body>
@@ -104,14 +152,53 @@
 
     <div class="container">
         <h1>Your Emails</h1>
+        <div class="search-container">
+            <form action="{{ url_for('home') }}" method="GET" class="search-form">
+                <input type="text" name="search" class="search-input" placeholder="Search emails..." value="{{ search_query }}">
+                <button type="submit" class="search-button">Search</button>
+                {% if search_query %}
+                    <button type="button" class="search-button" style="background-color: #6c757d;" onclick="clearSearch()">Clear</button>
+                {% endif %}
+            </form>
+            {% if search_query %}
+                <p class="search-results">Results for "{{ search_query }}": {{ emails|length }} email(s) found</p>
+            {% endif %}
+        </div>
         <div class="email-grid">
-            {% for email in emails %}
-            <div class="email-box">
-                <div class="email-subject">Email {{ email.id }}: {{ email.subject }}</div>
-                <div class="email-content">{{ email.content }}</div>
-            </div>
-            {% endfor %}
+            {% if emails|length == 0 %}
+                <p class="no-results">No emails found matching your search.</p>
+            {% else %}
+                {% for email in emails %}
+                <div class="email-box">
+                    <div class="email-subject">Email {{ email.id }}: {{ email.subject }}</div>
+                    <div class="email-content">{{ email.content }}</div>
+                </div>
+                {% endfor %}
+            {% endif %}
         </div>
     </div>
+    
+    <script>
+        // Handle Enter key in search input
+        document.querySelector('.search-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.querySelector('.search-form').submit();
+            }
+        });
+        
+        // Add clear search functionality
+        function clearSearch() {
+            window.location.href = "{{ url_for('home') }}";
+        }
+        
+        // Add keyboard shortcut for clearing search (Ctrl+K)
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'k') {
+                e.preventDefault();
+                clearSearch();
+            }
+        });
+    </script>
 </body>
 </html>

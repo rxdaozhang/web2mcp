@@ -34,12 +34,27 @@ def login():
 @app.route('/home')
 @login_required
 def home():
-    emails = [
+    # Sample email data
+    all_emails = [
         {'id': 1, 'subject': 'You owe a bill', 'content': 'Please pay your outstanding balance of $150.00 by the end of this month.'},
         {'id': 2, 'subject': 'Meeting reminder', 'content': 'Don\'t forget about the team meeting tomorrow at 2 PM in Conference Room A.'},
         {'id': 3, 'subject': 'Project update', 'content': 'The quarterly project review has been scheduled for next Friday. Please prepare your reports.'}
     ]
-    return render_template('home.html', emails=emails)
+    
+    # Get search query from URL parameters
+    search_query = request.args.get('search', '').strip()
+    
+    # Filter emails if search query is provided
+    if search_query:
+        search_lower = search_query.lower()
+        emails = [
+            email for email in all_emails 
+            if search_lower in email['subject'].lower() or search_lower in email['content'].lower()
+        ]
+    else:
+        emails = all_emails
+    
+    return render_template('home.html', emails=emails, search_query=search_query)
 
 @app.route('/starred')
 @login_required
