@@ -1,0 +1,47 @@
+{
+  "server": {
+    "name": "example-mcp-server",
+    "version": "0.1.0"
+  },
+  "tools": [
+    {
+      "name": "sum",
+      "description": "Add two numbers",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "a": { "type": "number", "description": "First addend" },
+          "b": { "type": "number", "description": "Second addend" }
+        },
+        "required": ["a", "b"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "send_email",
+      "description": "Send a basic email",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "to": { "type": "string", "format": "email" },
+          "subject": { "type": "string" },
+          "body": { "type": "string" }
+        },
+        "required": ["to", "subject", "body"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_user_info",
+      "description": "Get user information by ID",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "string", "description": "User ID to fetch" }
+        },
+        "required": ["user_id"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
