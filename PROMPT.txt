@@ -1,0 +1,82 @@
+You are given all of the tables and form elements on a website.
+
+Your task:
+
+Remove items that are purely navigational or UI-chrome (e.g., “Close”, “Back”, “Main menu”, “Settings”, “More…”, “expanded”, “Collapse”, unread counts, tooltips, decorative labels).
+
+Keep only items that represent meaningful actions for a programmatic API (e.g., create, read, update, delete, search, download).
+
+Group related actions into high-level Objects (e.g., Document, File, Email, Order, User).
+
+Under each object, determine the API-style methods available and their parameters (if applicable).
+
+If multiple actions differ only by a parameter value, collapse them into one method with a parameter list.
+
+Once you have your final result, convert this to an API spec.
+
+Output only in the format:
+
+{
+  "server": {
+    "name": "example-mcp-server",
+    "version": "0.1.0"
+  },
+  "tools": [
+    {
+      "name": "sum",
+      "description": "Add two numbers",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "a": { "type": "number", "description": "First addend" },
+          "b": { "type": "number", "description": "Second addend" }
+        },
+        "required": ["a", "b"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "send_email",
+      "description": "Send a basic email",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "to": { "type": "string", "format": "email" },
+          "subject": { "type": "string" },
+          "body": { "type": "string" },
+          "important_flag": { "type": "boolean" },
+          "cc": { "type": "array", "items": { "type": "string" }}
+        },
+        "required": ["to", "subject", "body"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "crawl_website",
+      "description": "Crawl a website and extract information",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The URL to crawl"
+          },
+          "max_depth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 2,
+            "description": "Maximum depth for crawling"
+          }
+        },
+        "required": ["url"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
+
+Here's the data:
+
+{{SUMMARY_OF_PAGE_ACTIONS}}
