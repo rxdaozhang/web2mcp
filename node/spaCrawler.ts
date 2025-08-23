@@ -64,6 +64,7 @@ interface FormData {
 	inputs: FormInput[];
 	textContent: string;
 	elementCount: number;
+	operation: 'CREATE' | 'READ' | 'UPDATE' | 'DELETE';
 }
 
 // Utility functions
@@ -252,6 +253,30 @@ async function extractTabularData(stagehand: Stagehand): Promise<TableData[]> {
 	return tabularData;
 }
 
+// Helper function to determine CRUD operation based on form type
+function determineFormOperation(formType: FormData['type']): 'CREATE' | 'READ' | 'UPDATE' | 'DELETE' {
+	switch (formType) {
+		case 'search':
+		case 'filter':
+			return 'READ';
+		case 'delete':
+		case 'remove':
+		case 'unsubscribe':
+			return 'DELETE';
+		case 'login':
+		case 'registration':
+		case 'contact':
+		case 'feedback':
+		case 'newsletter':
+		case 'checkout':
+			return 'CREATE';
+		case 'settings':
+			return 'UPDATE';
+		default:
+			return 'CREATE'; // Default to CREATE for unknown types
+	}
+}
+
 async function extractFormData(stagehand: Stagehand, existingFormSelectors?: Set<string>): Promise<FormData[]> {
 	// TODO: Consider replacing form type interpretation with LLM
 	const formData: FormData[] = [];
@@ -402,14 +427,15 @@ async function extractFormData(stagehand: Stagehand, existingFormSelectors?: Set
 					type: formType,
 					inputs: inputs,
 					textContent: form.description,
-					elementCount: inputs.length
+					elementCount: inputs.length,
+					operation: determineFormOperation(formType)
 				});
 			}
 		}
 		
 		// Also look for standalone input groups that might not be in traditional forms
 		const inputGroups = await stagehand.page.observe({
-			instruction: "Find groups of input elements that work together as a form-like interface, even if they're not wrapped in a <form> tag. Look for search bars, filter panels, dropdown menus, select elements, or other input collections. Specifically look for search functionality - any input field with 'search' in the placeholder, nearby search buttons, or elements that allow users to search or filter content. Include individual search input fields even if they're not part of a larger form group."
+			instruction: "Find groups of input elements that work together as a form-like interface, even if they're not wrapped in a <form> tag. Look for search bars, filter panels, dropdown menus, select elements, or other input collections. If there's an input element, then you must have included its parent container in this list."
 		});
 		
 		for (const group of inputGroups) {
@@ -469,59 +495,16 @@ async function extractFormData(stagehand: Stagehand, existingFormSelectors?: Set
 						type: groupType,
 						inputs: groupInputs,
 						textContent: group.description,
-						elementCount: groupInputs.length
+						elementCount: groupInputs.length,
+						operation: determineFormOperation(groupType)
 					});
 				}
 			}
 		}
 		
-		// Also look specifically for dropdown and select elements
-		const dropdownElements = await stagehand.page.observe({
-			instruction: "Find dropdown menus, select elements, and any interactive elements that show a list of options when clicked. Look for elements that might be used for filtering, sorting, or selecting from a list of choices."
-		});
-		
-		for (const dropdown of dropdownElements) {
-			const description = dropdown.description.toLowerCase();
-			const selector = dropdown.selector;
-			
-			// Skip if already captured
-			if (seenSelectors.has(selector)) continue;
-			
-			// Only consider elements that are clearly dropdowns or selects
-			if (description.includes('dropdown') || 
-				description.includes('select') || 
-				description.includes('menu') ||
-				description.includes('options') ||
-				description.includes('choices') ||
-				selector.includes('select') ||
-				selector.includes('dropdown')) {
-				
-				seenSelectors.add(selector);
-				
-				let formType: FormData['type'] = 'filter';
-				if (description.includes('sort')) formType = 'filter';
-				else if (description.includes('category')) formType = 'filter';
-				else if (description.includes('language')) formType = 'settings';
-				else if (description.includes('country')) formType = 'filter';
-				
-				formData.push({
-					selector: selector,
-					type: formType,
-					inputs: [{
-						selector: selector,
-						type: 'select',
-						description: dropdown.description,
-						required: description.includes('required')
-					}],
-					textContent: dropdown.description,
-					elementCount: 1
-				});
-			}
-		}
-		
 		// Also look specifically for search-related elements that might have been missed
 		const searchElements = await stagehand.page.observe({
-			instruction: "Find any search-related elements that might not have been captured yet. Look for input fields with 'search' in the placeholder text, input fields near search buttons, or any elements that allow users to search or filter content. Include individual search input fields, search forms, and any container that contains search functionality."
+			instruction: "Find any search-related elements on the page. Look for input fields with 'search' in the placeholder text, input fields near search buttons, or any elements that allow users to search or filter content. Include individual search input fields, search forms, and any container that contains search functionality."
 		});
 		
 		for (const searchElement of searchElements) {
@@ -578,7 +561,8 @@ async function extractFormData(stagehand: Stagehand, existingFormSelectors?: Set
 						type: 'search',
 						inputs: searchInputs,
 						textContent: searchElement.description,
-						elementCount: searchInputs.length
+						elementCount: searchInputs.length,
+						operation: determineFormOperation('search')
 					});
 				}
 			}
@@ -690,105 +674,29 @@ async function extractClickableElements(stagehand: Stagehand, formInputSelectors
 	return clickableElements;
 }
 
-async function handleModalInteractions(stagehand: Stagehand, clickableElements: ClickableElement[], existingFormSelectors?: Set<string>): Promise<any[]> {
-	const modalOperations: any[] = [];
-	
-	try {
-		// Test all clickable elements to see which ones open modals
-		const modalTriggers = clickableElements;
-		
-		console.info(`Found ${modalTriggers.length} modal triggers to test`);
-		
-		for (const trigger of modalTriggers) {
-			console.info(`Testing modal trigger: ${trigger.text} (${trigger.selector})`);
-			
-			try {
-				// Click on the modal trigger
-				await stagehand.page.act(`Click on the element with selector "${trigger.selector}"`);
-				await stagehand.page.waitForTimeout(2000); // Wait for modal to open
-				
-				// Look for modal content
-				const modalContent = await stagehand.page.observe({
-					instruction: "Find modal or popup content that appeared after clicking. Look for dialog boxes, popups, overlays, or any content that appeared on top of the page."
-				});
-				
-				if (modalContent.length > 0) {
-					console.info(`Modal opened successfully: ${modalContent.length} elements found`);
-					
-					// Extract form data from the modal, excluding previously extracted forms
-					const modalFormData = await extractFormData(stagehand, existingFormSelectors);
-					
-					// TODO: Allow for multiple levels of recursion and clicking links within modals
-					// const modalClickables = await extractClickableElements(stagehand);
-					
-					// Add modal operations
-					modalOperations.push({
-						trigger: {
-							selector: trigger.selector,
-							text: trigger.text,
-							type: trigger.type
-						},
-						modalContent: modalContent.map(content => ({
-							selector: content.selector,
-							description: content.description
-						})),
-						forms: modalFormData,
-						// TODO: Add clickables when implementing modal recursion
-						// clickables: modalClickables,
-						operation: 'MODAL_INTERACTION'
-					});
-					
-					// Try to close the modal
-					const closeButtons = await stagehand.page.observe({
-						instruction: "Find close buttons, X buttons, or cancel buttons in the modal to close it."
-					});
-					
-					if (closeButtons.length > 0) {
-						await stagehand.page.act(`Click on the element with selector "${closeButtons[0].selector}"`);
-						await stagehand.page.waitForTimeout(1000);
-					} else {
-						// Try pressing Escape key
-						await stagehand.page.keyboard.press('Escape');
-						await stagehand.page.waitForTimeout(1000);
-					}
-				} else {
-					console.info('No modal content detected');
-				}
-				
-			} catch (error) {
-				console.error(`Error testing modal trigger ${trigger.selector}:`, error);
-			}
-		}
-		
-		console.info(`Completed modal interaction testing. Found ${modalOperations.length} successful modal operations`);
-		
-	} catch (error) {
-		console.error('Error handling modal interactions:', error);
-	}
-	
-	return modalOperations;
-}
 
-async function testNavigationElements(stagehand: Stagehand, clickableElements: ClickableElement[]): Promise<ClickableElement[]> {
+
+async function testNavigationAndModals(stagehand: Stagehand, clickableElements: ClickableElement[], existingFormSelectors?: Set<string>): Promise<{navigationElements: ClickableElement[], modalOperations: any[]}> {
 	const navigationElements: ClickableElement[] = [];
+	const modalOperations: any[] = [];
 	
 	try {
 		// Get current URL to compare against
 		const currentUrl = stagehand.page.url();
-		console.info(`Testing navigation elements. Current URL: ${currentUrl}`);
+		console.info(`Testing navigation and modal elements. Current URL: ${currentUrl}`);
 		
-		// Test all clickable elements to see which ones navigate
-		const potentialNavElements = clickableElements;
+		// Test all clickable elements to see which ones navigate vs open modals
+		const potentialElements = clickableElements;
 		
-		console.info(`Found ${potentialNavElements.length} potential navigation elements to test`);
+		console.info(`Found ${potentialElements.length} potential elements to test`);
 		
-		for (const element of potentialNavElements) {
+		for (const element of potentialElements) {
 			console.info(`Testing element: ${element.text} (${element.selector})`);
 			
 			try {
 				// Click on the element
 				await stagehand.page.act(`Click on the element with selector "${element.selector}"`);
-				await stagehand.page.waitForTimeout(2000); // Wait for potential navigation
+				await stagehand.page.waitForTimeout(2000); // Wait for potential navigation or modal
 				
 				// Check if URL changed
 				const newUrl = stagehand.page.url();
@@ -801,6 +709,49 @@ async function testNavigationElements(stagehand: Stagehand, clickableElements: C
 					await navigate_to_page(stagehand, currentUrl, []);
 				} else {
 					console.info(`✗ No navigation: URL remained ${currentUrl}`);
+					
+					// Check if a modal opened
+					const modalContent = await stagehand.page.observe({
+						instruction: "Find any modal, popup, or dialog elements that are currently visible and displayed on the page. Look for elements with modal-like styling (overlays, popups, dialogs) that are not hidden. Only return elements that are actually visible and active on the page."
+					});
+					
+					if (modalContent.length > 0) {
+						console.info(`✓ Modal detected: ${modalContent.length} modal elements found`);
+						
+						// Extract form data from the modal, excluding previously extracted forms
+						const modalFormData = await extractFormData(stagehand, existingFormSelectors);
+						
+						// Add modal operations
+						modalOperations.push({
+							trigger: {
+								selector: element.selector,
+								text: element.text,
+								type: element.type
+							},
+							modalContent: modalContent.map(content => ({
+								selector: content.selector,
+								description: content.description
+							})),
+							forms: modalFormData,
+							operation: 'MODAL_INTERACTION'
+						});
+						
+						// Try to close the modal
+						const closeButtons = await stagehand.page.observe({
+							instruction: "Find close buttons, X buttons, or cancel buttons in the modal to close it."
+						});
+						
+						if (closeButtons.length > 0) {
+							await stagehand.page.act(`Click on the element with selector "${closeButtons[0].selector}"`);
+							await stagehand.page.waitForTimeout(1000);
+						} else {
+							// Try pressing Escape key
+							await stagehand.page.keyboard.press('Escape');
+							await stagehand.page.waitForTimeout(1000);
+						}
+					} else {
+						console.info(`✗ No modal detected`);
+					}
 				}
 				
 			} catch (error) {
@@ -809,13 +760,13 @@ async function testNavigationElements(stagehand: Stagehand, clickableElements: C
 			}
 		}
 		
-		console.info(`Found ${navigationElements.length} actual navigation elements`);
+		console.info(`Found ${navigationElements.length} navigation elements and ${modalOperations.length} modal operations`);
 		
 	} catch (error) {
-		console.error('Error testing navigation elements:', error);
+		console.error('Error testing navigation and modal elements:', error);
 	}
 	
-	return navigationElements;
+	return { navigationElements, modalOperations };
 }
 
 async function main() {
@@ -906,18 +857,8 @@ async function main() {
 		
 		// Add CRUD operations for each form
 		formData.forEach((form, index) => {
-			// Determine operation type based on form type
-			let operation: 'READ' | 'CREATE' | 'UPDATE' | 'DELETE' = 'CREATE';
-			if (form.type === 'settings') {
-				operation = 'UPDATE';
-			} else if (form.type === 'search' || form.type === 'filter') {
-				operation = 'READ';
-			} else if (form.type === 'delete' || form.type === 'remove' || form.type === 'unsubscribe') {
-				operation = 'DELETE';
-			}
-			
 			crud_operations.push({
-				operation: operation,
+				operation: form.operation,
 				type: form.type,
 				selector: form.selector,
 				elementCount: form.elementCount,
@@ -925,7 +866,7 @@ async function main() {
 					type: input.type,
 					required: input.required,
 					placeholder: input.placeholder,
-					label: input.label,
+					label: input.label || input.description,
 					options: input.options
 				})),
 				textContent: form.textContent.substring(0, 200) + (form.textContent.length > 200 ? '...' : ''),
@@ -945,50 +886,52 @@ async function main() {
 			});
 		});
 		
-		// Extract clickable elements (for navigation and interaction)
-		console.info('Extracting clickable elements...');
-		const clickableElements = await extractClickableElements(stagehand, formInputSelectors);
-		
-		console.info(`Found ${clickableElements.length} clickable elements`);
-		
-		// Print all clickable elements
-		console.info('=== CLICKABLE ELEMENTS ===');
-		clickableElements.forEach((element, index) => {
-			console.info(`${index + 1}. Type: ${element.type}`);
-			console.info(`   Selector: ${element.selector}`);
-			console.info(`   Text: ${element.text}`);
-			console.info(`   Description: ${element.description}`);
-			if (element.href) {
-				console.info(`   Href: ${element.href}`);
-			}
-			console.info('');
-		});
-		
-		// Test clickable elements to see which ones actually navigate to new pages
-		const navigationElements = await testNavigationElements(stagehand, clickableElements);
-		
-		// Create modal elements list (clickable elements - navigation elements)
-		const modalElements = clickableElements.filter(element => 
-			!navigationElements.some(navElement => navElement.selector === element.selector)
-		);
-		console.info(`Found ${modalElements.length} potential modal elements`);
-		
 		// Collect all form selectors to prevent duplication in modal extraction
 		const existingFormSelectors = new Set<string>();
 		formData.forEach(form => {
 			existingFormSelectors.add(form.selector);
 		});
 		
-		// Handle modal interactions
-		const modalOperations = await handleModalInteractions(stagehand, modalElements, existingFormSelectors);
-		modalOperations.forEach(operation => {
-			crud_operations.push(operation);
+		// Extract clickable elements (for navigation and interaction)
+		console.info('Extracting clickable elements...');
+		const clickableElements = await extractClickableElements(stagehand, formInputSelectors);
+		
+		console.info(`Found ${clickableElements.length} clickable elements`);
+		
+		// Test clickable elements to see which ones navigate vs open modals
+		const { navigationElements, modalOperations } = await testNavigationAndModals(stagehand, clickableElements, existingFormSelectors);
+		
+		// Convert modal operations to CRUD format
+		modalOperations.forEach(modalOp => {
+			// For each form found in the modal, create a CRUD operation
+			modalOp.forms.forEach((form: FormData) => {
+				// Create path that includes the modal trigger
+				const modalPath = [...current_path, {
+					intra_page_path: modalOp.trigger.selector,
+					is_new_link: false // Modal triggers don't navigate to new pages
+				}];
+				
+				crud_operations.push({
+					operation: form.operation,
+					type: form.type,
+					selector: form.selector,
+					elementCount: form.elementCount,
+					inputs: form.inputs.map(input => ({
+						type: input.type,
+						required: input.required,
+						placeholder: input.placeholder,
+						label: input.label || input.description,
+						options: input.options
+					})),
+					textContent: form.textContent.substring(0, 200) + (form.textContent.length > 200 ? '...' : ''),
+					path: modalPath
+				});
+			});
 		});
 		
 		console.info('=== CRUD OPERATIONS JSON ===');
 		console.info(JSON.stringify(crud_operations, null, 2));
-		
-		/*
+
 		// Add navigation elements to queue
 		if (depth < config.maxDepth) {
 			// Add new paths to the queue
@@ -1011,8 +954,6 @@ async function main() {
 				}
 			}
 		}
-		*/
-		
 	}
 	
 	console.info("Crawling completed!");
