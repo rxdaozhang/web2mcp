@@ -815,10 +815,10 @@ async function main() {
 	
 	console.info(`Root page URL: ${rootUrl}`);
 	console.info(`Initial seen set: ${Array.from(seen_set)}`);
+	const crud_operations: any[] = [];
 	
 	// Main crawling loop
 	while (queue.length > 0) {
-		const crud_operations: any[] = [];
 		const queue_item = queue.pop()!;
 		const new_path = queue_item.path;
 		const depth = queue_item.depth;
@@ -928,9 +928,6 @@ async function main() {
 				});
 			});
 		});
-		
-		console.info('=== CRUD OPERATIONS JSON ===');
-		console.info(JSON.stringify(crud_operations, null, 2));
 
 		// Add navigation elements to queue
 		if (depth < config.maxDepth) {
@@ -956,6 +953,8 @@ async function main() {
 		}
 	}
 	
+	console.info('=== CRUD OPERATIONS JSON ===');
+	console.info(JSON.stringify(crud_operations, null, 2));
 	console.info("Crawling completed!");
 	
 	// Close the stagehand instance
