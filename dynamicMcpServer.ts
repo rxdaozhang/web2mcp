@@ -8,9 +8,19 @@ import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { z, type ZodTypeAny } from "zod";
+import OpenAI from "openai";
+import dotenv from "dotenv";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Load environment variables
+dotenv.config({ path: ".env" });
+
+// Configuration
+const config = {
+  openaiApiKey: process.env.OPENAI_API_KEY || "your-openai-key"
+};
 
 // Types for the configuration
 interface ToolConfig {
@@ -27,11 +37,37 @@ interface ServerConfig {
   tools: ToolConfig[];
 }
 
+// Types for page actions
+interface PathObject {
+  intra_page_path: string;
+  is_new_link: boolean;
+}
+
+interface PageAction {
+  operation: 'READ' | 'CREATE' | 'UPDATE' | 'DELETE';
+  type: string;
+  selector: string;
+  elementCount: number;
+  hasHeaders?: boolean;
+  hasRows?: boolean;
+  inputs?: Array<{
+    type: string;
+    required: boolean;
+    label: string;
+    placeholder?: string;
+    options?: string[];
+  }>;
+  textContent: string;
+  path: PathObject[];
+}
+
 // Enhanced Dynamic MCP Server
 export class EnhancedMcpServer {
   private server: McpServer;
   private transport: StdioServerTransport;
   private registeredTools: Set<string> = new Set();
+  private loadedConfig: ServerConfig | null = null;
+  private pageActions: PageAction[] = [];
 
   constructor(name: string = "enhanced-mcp-server", version: string = "0.1.0") {
     this.server = new McpServer({
@@ -85,6 +121,9 @@ export class EnhancedMcpServer {
       const configContent = readFileSync(configPath, 'utf-8');
       const config: ServerConfig = JSON.parse(configContent);
       
+      // Store the loaded configuration
+      this.loadedConfig = config;
+      
       // Update server name and version if provided
       if (config.server) {
         this.server = new McpServer({
@@ -103,6 +142,22 @@ export class EnhancedMcpServer {
       console.error(`Loaded ${config.tools.length} tools from config file: ${configPath}`);
     } catch (error) {
       console.error(`Error loading config from ${configPath}:`, error);
+      throw error;
+    }
+  }
+
+  // Load page actions from JSON file
+  loadPageActionsFromFile(pageActionsPath: string): void {
+    try {
+      const pageActionsContent = readFileSync(pageActionsPath, 'utf-8');
+      const pageActions: PageAction[] = JSON.parse(pageActionsContent);
+      
+      // Store the loaded page actions
+      this.pageActions = pageActions;
+      
+      console.error(`Loaded ${pageActions.length} page actions from file: ${pageActionsPath}`);
+    } catch (error) {
+      console.error(`Error loading page actions from ${pageActionsPath}:`, error);
       throw error;
     }
   }
@@ -147,14 +202,103 @@ export class EnhancedMcpServer {
     args: Record<string, unknown>
   ): Promise<unknown> {
     console.error(`Universal handler called with: ${name}`, args);
-    // TODO: Implement page traversal and website interaction
+    
+    // Find the tool configuration for this function
+    const toolConfig = this.findToolConfig(name);
+    
+    if (!toolConfig) {
+      return { 
+        error: `Tool configuration not found for: ${name}`,
+        handled_by: "universalHandler"
+      };
+    }
+    
+    // Format the message as requested
+    const message = `A user has just invoked this function:
+
+${JSON.stringify(toolConfig, null, 2)}
+
+With the arguments:
+${Object.keys(args).length === 0 ? 'No arguments' : Object.entries(args).map(([key, value]) => `  ${key} = ${JSON.stringify(value)}`).join('\n')}
+
+Return the index in the following operation list that corresponds to satisfying this request. ONLY respond with the index and no additional output:
+
+${JSON.stringify(this.pageActions, null, 2)}`;
+    
+    // Call ChatGPT to determine the appropriate page action index
+    let selectedIndex: number | null = null;
+    try {
+      selectedIndex = await this.callChatGPT(message);
+      
+      // Validate the index is within bounds
+      if (selectedIndex < 0 || selectedIndex >= this.pageActions.length) {
+        console.error(`ChatGPT returned invalid index: ${selectedIndex}, but pageActions length is ${this.pageActions.length}`);
+        selectedIndex = null;
+      }
+    } catch (error) {
+      console.error('Failed to get page action index from ChatGPT:', error);
+      selectedIndex = null;
+    }
+    
+    // TODO: Implement page traversal and website interaction using pageActions
     return { 
       ok: true, 
       handled_by: "universalHandler", 
       name, 
       args,
-      message: "User #1 has name John Doe"
+      message,
+      availablePageActions: this.pageActions.length,
+      pageActions: this.pageActions,
+      selectedPageActionIndex: selectedIndex,
+      selectedPageAction: selectedIndex !== null ? this.pageActions[selectedIndex] : null
     };
+  }
+
+  private findToolConfig(name: string): ToolConfig | null {
+    if (!this.loadedConfig) {
+      return null;
+    }
+    
+    return this.loadedConfig.tools.find(tool => tool.name === name) || null;
+  }
+
+  private async callChatGPT(message: string): Promise<number> {
+    try {
+      // Initialize OpenAI client
+      const openai = new OpenAI({
+        apiKey: config.openaiApiKey,
+      });
+      
+      console.error('Calling ChatGPT to determine page action index...');
+      
+      // Make the API call
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4',
+        messages: [
+          {
+            role: 'user',
+            content: message
+          }
+        ]
+      });
+      
+      const response = completion.choices[0]?.message?.content;
+      if (!response) {
+        throw new Error('No response received from ChatGPT');
+      }
+      
+      // Parse the response as an integer
+      const index = parseInt(response.trim());
+      if (isNaN(index)) {
+        throw new Error(`Invalid response from ChatGPT: "${response}" - expected a number`);
+      }
+      
+      console.error(`ChatGPT returned index: ${index}`);
+      return index;
+    } catch (error) {
+      console.error('Error calling ChatGPT:', error);
+      throw error;
+    }
   }
 
   // Get list of registered tools
@@ -183,12 +327,24 @@ async function main(): Promise<void> {
   // Get config file from CLI argument, fallback to exampleMcpConfig.json
   const configFile = process.argv[2] || join(__dirname, "..", "test", "exampleMcpConfig.json");
   
+  // Get page actions file from CLI argument, fallback to exampleSummaryPageActions.json
+  const pageActionsFile = process.argv[3] || join(__dirname, "..", "test", "exampleSummaryPageActions.json");
+  
   // Load configuration from JSON file
   try {
     server.loadConfigFromFile(configFile);
     console.error(`Loaded config from: ${configFile}`);
   } catch (error) {
     console.error(`Error loading config file '${configFile}':`, error);
+    process.exit(1);
+  }
+  
+  // Load page actions from JSON file
+  try {
+    server.loadPageActionsFromFile(pageActionsFile);
+    console.error(`Loaded page actions from: ${pageActionsFile}`);
+  } catch (error) {
+    console.error(`Error loading page actions file '${pageActionsFile}':`, error);
     process.exit(1);
   }
   

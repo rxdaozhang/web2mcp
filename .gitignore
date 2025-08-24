@@ -10,3 +10,4 @@ python/venv/
 *.node_modules
 package-lock.json
 outputMcpConfig.json
+outputSummaryPageActions.json

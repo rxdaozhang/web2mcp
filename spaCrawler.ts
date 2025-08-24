@@ -990,10 +990,14 @@ async function main() {
 			}
 		}
 	}
+	console.info("Crawling completed!");
+	
+	// Save CRUD operations to outputSummaryPageActions.json
+	writeFileSync('outputSummaryPageActions.json', JSON.stringify(crud_operations, null, 2));
+	console.info('CRUD operations saved to outputSummaryPageActions.json');
 	
 	console.info('=== CRUD OPERATIONS JSON ===');
 	console.info(JSON.stringify(crud_operations, null, 2));
-	console.info("Crawling completed!");
 	
 	// Call ChatGPT to generate MCP config
 	try {

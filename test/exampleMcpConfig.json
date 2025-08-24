@@ -1,45 +1,43 @@
 {
   "server": {
-    "name": "example-mcp-server",
+    "name": "email-mcp-server",
     "version": "0.1.0"
   },
   "tools": [
     {
-      "name": "sum",
-      "description": "Add two numbers",
+      "name": "list_emails",
+      "description": "List emails with optional filters",
       "input_schema": {
         "type": "object",
         "properties": {
-          "a": { "type": "number", "description": "First addend" },
-          "b": { "type": "number", "description": "Second addend" }
+          "starred": { "type": "boolean", "description": "If true, return only starred emails; if omitted or false, return all emails" }
         },
-        "required": ["a", "b"],
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "search_emails",
+      "description": "Search emails by text query",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query text" }
+        },
+        "required": ["query"],
         "additionalProperties": false
       }
     },
     {
       "name": "send_email",
-      "description": "Send a basic email",
+      "description": "Send an email",
       "input_schema": {
         "type": "object",
         "properties": {
-          "to": { "type": "string", "format": "email" },
-          "subject": { "type": "string" },
-          "body": { "type": "string" }
+          "subject": { "type": "string", "description": "Email subject" },
+          "body": { "type": "string", "description": "Email body text" }
         },
-        "required": ["to", "subject", "body"],
-        "additionalProperties": false
-      }
-    },
-    {
-      "name": "get_user_info",
-      "description": "Get user information by ID",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "user_id": { "type": "string", "description": "User ID to fetch" }
-        },
-        "required": ["user_id"],
+        "required": ["subject", "body"],
         "additionalProperties": false
       }
     }

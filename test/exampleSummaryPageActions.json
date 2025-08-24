@@ -1,0 +1,82 @@
+[
+  {
+    "operation": "READ",
+    "type": "grid",
+    "selector": "xpath=/html[1]/body[1]/div[1]/div[2]",
+    "elementCount": 1,
+    "hasHeaders": false,
+    "hasRows": false,
+    "textContent": "Main container div holding a collection of email items, each represented by a child div with email details.",
+    "path": []
+  },
+  {
+    "operation": "CREATE",
+    "type": "other",
+    "selector": "xpath=/html[1]/body[1]/div[2]/div[1]/form[1]/div[1]/input[1]",
+    "elementCount": 4,
+    "inputs": [
+      {
+        "type": "text",
+        "required": false,
+        "label": "textbox: Subject:"
+      },
+      {
+        "type": "textarea",
+        "required": false,
+        "label": "textbox: Body:"
+      },
+      {
+        "type": "submit",
+        "required": false,
+        "label": "button: Cancel"
+      },
+      {
+        "type": "submit",
+        "required": false,
+        "label": "button: Send"
+      }
+    ],
+    "textContent": "Textbox input field for the email subject within the modal form.",
+    "path": [
+      {
+        "intra_page_path": "xpath=/html[1]/body[1]/div[1]/button[1]",
+        "is_new_link": false
+      }
+    ]
+  },
+  {
+    "operation": "READ",
+    "type": "search",
+    "selector": "xpath=/html[1]/body[1]/div[1]/div[1]/form[1]",
+    "elementCount": 1,
+    "inputs": [
+      {
+        "type": "search",
+        "required": false,
+        "label": "textbox: Search emails..."
+      }
+    ],
+    "textContent": "Form containing a textbox for searching emails and a search button, functioning as a search bar.",
+    "path": [
+      {
+        "intra_page_path": "xpath=/html[1]/body[1]/div[1]/button[1]",
+        "is_new_link": false
+      }
+    ]
+  },
+  {
+    "operation": "READ",
+    "type": "grid",
+    "selector": "xpath=/html[1]/body[1]/div[1]/div[1]/div[1]",
+    "elementCount": 1,
+    "hasHeaders": false,
+    "hasRows": false,
+    "textContent": "Main container holding a collection of similar items (starred emails)",
+    "path": [
+      {
+        "intra_page_path": "xpath=/html[1]/body[1]/nav[1]/div[1]/div[2]/a[2]",
+        "is_new_link": true
+      }
+    ]
+  }
+]
