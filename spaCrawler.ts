@@ -362,14 +362,12 @@ async function extractFormData(stagehand: Stagehand, existingFormSelectors?: Set
 				
 				// Determine input type
 				let inputType: FormInput['type'] = 'text';
-				if (inputDesc.includes('email') || selector.includes('email')) {
-					inputType = 'email';
-				} else if (inputDesc.includes('password') || selector.includes('password')) {
+				if (inputDesc.includes('password') || selector.includes('password')) {
 					inputType = 'password';
-				} else if (inputDesc.includes('number') || selector.includes('number')) {
-					inputType = 'number';
 				} else if (inputDesc.includes('phone') || selector.includes('tel') || selector.includes('phone')) {
 					inputType = 'tel';
+				} else if (inputDesc.includes('number') || selector.includes('number')) {
+					inputType = 'number';
 				} else if (inputDesc.includes('url') || selector.includes('url')) {
 					inputType = 'url';
 				} else if (inputDesc.includes('search') || selector.includes('search')) {
