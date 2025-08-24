@@ -3,9 +3,11 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { TextContent } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { z, type ZodTypeAny } from "zod";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -43,6 +45,40 @@ export class EnhancedMcpServer {
     this.transport = new StdioServerTransport();
   }
 
+  jsonSchemaToZodShape(schema: any): Record<string, ZodTypeAny> {
+    if (!schema || schema.type !== "object") return {};
+    const required = new Set<string>(schema.required ?? []);
+    const props = schema.properties ?? {};
+    const shape: Record<string, ZodTypeAny> = {};
+  
+    for (const [key, def] of Object.entries<any>(props)) {
+      let t: ZodTypeAny;
+  
+      if (def?.enum?.length) {
+        // enums: require string enums here; extend if needed
+        t = z.enum(def.enum as [string, ...string[]]);
+      } else {
+        switch (def.type) {
+          case "string":  t = z.string(); break;
+          case "boolean": t = z.boolean(); break;
+          case "number":  t = z.number(); break;
+          case "integer": t = z.number().int(); break;
+          case "array":   t = z.array(z.any()); break;       // extend as needed
+          case "object":  t = z.object({}); break;           // extend nested objects if you use them
+          default:        t = z.any();
+        }
+      }
+  
+      if (def.description) t = t.describe(def.description);
+      if (def.default !== undefined) t = t.default(def.default);
+      if (!required.has(key)) t = t.optional();
+  
+      shape[key] = t;
+    }
+  
+    return shape;
+  }
+
   // Load configuration from JSON file
   loadConfigFromFile(configPath: string): void {
     try {
@@ -78,31 +114,27 @@ export class EnhancedMcpServer {
     }
   }
 
+
   // Register a single tool
-  registerTool(
-    name: string,
-    description: string,
-    inputSchema: any
-  ): void {
+  registerTool(name: string, description: string, inputSchema: any): void {
     if (this.registeredTools.has(name)) {
       console.warn(`Tool '${name}' is already registered. Skipping.`);
       return;
     }
 
-    this.server.tool(
+    const zodShape = this.jsonSchemaToZodShape(inputSchema);
+
+    this.server.registerTool(
       name,
-      description,
-      inputSchema,
-      async (args: any) => {
+      { title: name, description, inputSchema: zodShape },
+      async (args: any): Promise<any> => {
         const result = await this.universalHandler(name, args);
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(result, null, 2)
-            }
-          ]
-        };
+
+        const content: TextContent[] = [
+          { type: "text", text: JSON.stringify(result, null, 2) },
+        ];
+
+        return { content };
       }
     );
 

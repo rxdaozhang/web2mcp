@@ -3,6 +3,8 @@ import boxen from "boxen";
 import chalk from "chalk";
 import dotenv from "dotenv";
 import crypto from "crypto";
+import OpenAI from "openai";
+import { readFileSync, writeFileSync } from "fs";
 
 // Load environment variables from .env file in the same directory
 dotenv.config({ path: ".env" });
@@ -769,6 +771,44 @@ async function testNavigationAndModals(stagehand: Stagehand, clickableElements: 
 	return { navigationElements, modalOperations };
 }
 
+async function callChatGPT(crudOperations: any[]): Promise<string> {
+	try {
+		// Read the PROMPT.txt file
+		const promptTemplate = readFileSync('PROMPT.txt', 'utf-8');
+		
+		// Replace the placeholder with the actual CRUD operations
+		const prompt = promptTemplate.replace('{{SUMMARY_OF_PAGE_ACTIONS}}', JSON.stringify(crudOperations, null, 2));
+		
+		// Initialize OpenAI client
+		const openai = new OpenAI({
+			apiKey: config.openaiApiKey,
+		});
+		
+		console.info('Calling ChatGPT to generate MCP config...');
+		
+		// Make the API call
+		const completion = await openai.chat.completions.create({
+			model: 'gpt-5',
+			messages: [
+				{
+					role: 'user',
+					content: prompt
+				}
+			]
+		});
+		
+		const response = completion.choices[0]?.message?.content;
+		if (!response) {
+			throw new Error('No response received from ChatGPT');
+		}
+		
+		return response;
+	} catch (error) {
+		console.error('Error calling ChatGPT:', error);
+		throw error;
+	}
+}
+
 async function main() {
 	// Initialize Stagehand
 	const stagehand = new Stagehand({
@@ -956,6 +996,23 @@ async function main() {
 	console.info('=== CRUD OPERATIONS JSON ===');
 	console.info(JSON.stringify(crud_operations, null, 2));
 	console.info("Crawling completed!");
+	
+	// Call ChatGPT to generate MCP config
+	try {
+		console.info('Generating MCP config with ChatGPT...');
+		const mcpConfig = await callChatGPT(crud_operations);
+		
+		// Save the response to outputMcpConfig.json
+		writeFileSync('outputMcpConfig.json', mcpConfig);
+		console.info('MCP config saved to outputMcpConfig.json');
+		
+		// Print the response to screen
+		console.info('=== GENERATED MCP CONFIG ===');
+		console.info(mcpConfig);
+		
+	} catch (error) {
+		console.error('Failed to generate MCP config:', error);
+	}
 	
 	// Close the stagehand instance
 	await stagehand.close();

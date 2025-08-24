@@ -14,7 +14,7 @@ If multiple actions differ only by a parameter value, collapse them into one met
 
 Once you have your final result, convert this to an API spec.
 
-Output only in the format:
+Output only in the format with NO additional characters:
 
 {
   "server": {
