@@ -58,15 +58,15 @@ interface PageAction {
   path: PathObject[];
 }
 
-// Enhanced Dynamic MCP Server
-export class EnhancedMcpServer {
+// Dynamic MCP Server
+export class DynamicMcpServer {
   private server: McpServer;
   private transport: StdioServerTransport;
   private registeredTools: Set<string> = new Set();
   private loadedConfig: ServerConfig | null = null;
   private pageActions: PageAction[] = [];
 
-  constructor(name: string = "enhanced-mcp-server", version: string = "0.1.0") {
+  constructor(name: string = "dynamic-mcp-server", version: string = "0.1.0") {
     this.server = new McpServer({
       name,
       version,
@@ -323,13 +323,13 @@ ${this.pageActions.map((action, index) => `${index}: ${JSON.stringify(action, nu
   // Start the server
   async start(): Promise<void> {
     await this.server.connect(this.transport);
-    console.error(`Enhanced MCP Server started with ${this.registeredTools.size} tools`);
+    console.error(`Dynamic MCP Server started with ${this.registeredTools.size} tools`);
     console.error("Registered tools:", this.getRegisteredTools());
   }
 
   // Stop the server
   async stop(): Promise<void> {
-    console.error("Enhanced MCP Server stopped");
+    console.error("Dynamic MCP Server stopped");
   }
 
   // Execute a page action using Stagehand
@@ -385,7 +385,7 @@ ${this.pageActions.map((action, index) => `${index}: ${JSON.stringify(action, nu
 // Main execution function
 async function main(): Promise<void> {
   console.error("Starting dynamic MCP server")
-  const server = new EnhancedMcpServer();
+  const server = new DynamicMcpServer();
   
   // Get config file from CLI argument, fallback to exampleMcpConfig.json
   const configFile = process.argv[2] || join(__dirname, "..", "test", "exampleMcpConfig.json");
