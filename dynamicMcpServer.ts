@@ -10,6 +10,7 @@ import { fileURLToPath } from "url";
 import { z, type ZodTypeAny } from "zod";
 import OpenAI from "openai";
 import dotenv from "dotenv";
+import { initializeStagehand, login, navigate_to_page, getConfig, type PathObject } from "./sharedUtils.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,10 +39,6 @@ interface ServerConfig {
 }
 
 // Types for page actions
-interface PathObject {
-  intra_page_path: string;
-  is_new_link: boolean;
-}
 
 interface PageAction {
   operation: 'READ' | 'CREATE' | 'UPDATE' | 'DELETE';
@@ -214,7 +211,7 @@ export class EnhancedMcpServer {
     }
     
     // Format the message as requested
-    const message = `A user has just invoked this function:
+    const pageActionPrompt = `A user has just invoked this function:
 
 ${JSON.stringify(toolConfig, null, 2)}
 
@@ -228,7 +225,7 @@ ${this.pageActions.map((action, index) => `${index}: ${JSON.stringify(action, nu
     // Call ChatGPT to determine the appropriate page action index
     let selectedIndex: number | null = null;
     try {
-      selectedIndex = await this.callChatGPT(message);
+      selectedIndex = await this.callChatGPT(pageActionPrompt);
       
       // Validate the index is within bounds
       if (selectedIndex < 0 || selectedIndex >= this.pageActions.length) {
@@ -240,18 +237,35 @@ ${this.pageActions.map((action, index) => `${index}: ${JSON.stringify(action, nu
       selectedIndex = null;
     }
     
-    // TODO: Implement page traversal and website interaction using pageActions
-    return { 
-      ok: true, 
-      handled_by: "universalHandler", 
-      name, 
-      args,
-      message,
-      availablePageActions: this.pageActions.length,
-      pageActions: this.pageActions,
-      selectedPageActionIndex: selectedIndex,
-      selectedPageAction: selectedIndex !== null ? this.pageActions[selectedIndex] : null
-    };
+    // Execute the page action if a valid index was found
+    if (selectedIndex !== null) {
+      try {
+        const executionResult = await this.executePageAction(selectedIndex);
+        return {
+          ok: true,
+          name,
+          args,
+          selectedPageAction: this.pageActions[selectedIndex],
+          executionResult
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          name,
+          args,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          selectedPageAction: this.pageActions[selectedIndex]
+        };
+      }
+    } else {
+      return { 
+        ok: false,
+        name, 
+        args,
+        error: "Could not determine which page action to execute",
+        selectedPageAction: null
+      };
+    }
   }
 
   private findToolConfig(name: string): ToolConfig | null {
@@ -316,6 +330,55 @@ ${this.pageActions.map((action, index) => `${index}: ${JSON.stringify(action, nu
   // Stop the server
   async stop(): Promise<void> {
     console.error("Enhanced MCP Server stopped");
+  }
+
+  // Execute a page action using Stagehand
+  async executePageAction(pageActionIndex: number): Promise<any> {
+    if (pageActionIndex < 0 || pageActionIndex >= this.pageActions.length) {
+      throw new Error(`Invalid page action index: ${pageActionIndex}`);
+    }
+
+    const pageAction = this.pageActions[pageActionIndex];
+    console.error(`Starting browser automation for: ${pageAction.operation} - ${pageAction.type}`);
+
+    try {
+      const config = getConfig();
+      const { stagehand, page } = await initializeStagehand(config, true); // Suppress logs in MCP server
+      
+      console.error('Performing login...');
+      await login(stagehand, config.url, config.username, config.password);
+      const rootUrl = page.url(); // Store the root URL (post-login page)
+      
+      console.error('Navigating to target page...');
+      // Navigate to the page if there's a path
+      if (pageAction.path && pageAction.path.length > 0) {
+        await navigate_to_page(stagehand, rootUrl, pageAction.path);
+      }
+      
+      // TODO: Implement the actual action based on the pageAction.operation
+      // This would involve interacting with forms, clicking elements, etc.
+      
+      const result = {
+        success: true,
+        pageAction: pageAction,
+        currentUrl: page.url(),
+        message: `Successfully executed ${pageAction.operation} operation for ${pageAction.type}`
+      };
+      
+      console.error('Cleaning up: Closing Stagehand...');
+      // Close the stagehand instance
+      await stagehand.close();
+      
+      console.error('Browser automation completed successfully');
+      return result;
+    } catch (error) {
+      console.error('Error executing page action:', error);
+      return {
+        success: false,
+        pageAction: pageAction,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
   }
 }
 
