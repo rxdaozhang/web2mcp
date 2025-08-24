@@ -223,7 +223,7 @@ ${Object.keys(args).length === 0 ? 'No arguments' : Object.entries(args).map(([k
 
 Return the index in the following operation list that corresponds to satisfying this request. ONLY respond with the index and no additional output:
 
-${JSON.stringify(this.pageActions, null, 2)}`;
+${this.pageActions.map((action, index) => `${index}: ${JSON.stringify(action, null, 2)}`).join('\n\n')}`;
     
     // Call ChatGPT to determine the appropriate page action index
     let selectedIndex: number | null = null;

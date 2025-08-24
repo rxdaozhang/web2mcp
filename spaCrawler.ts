@@ -849,7 +849,8 @@ async function main() {
 	}];
 	
 	let current_path: PathObject[] = initial_path;
-	const seen_set = new Set([page_hash(rootUrl)]); // The initial seen set is just the post-login page
+	const rootPathHash = page_hash(JSON.stringify(initial_path));
+	const seen_set = new Set([rootPathHash]);
 	
 	console.info(`Root page URL: ${rootUrl}`);
 	console.info(`Initial seen set: ${Array.from(seen_set)}`);
@@ -857,9 +858,7 @@ async function main() {
 	
 	// Main crawling loop
 	while (queue.length > 0) {
-		const queue_item = queue.pop()!;
-		const new_path = queue_item.path;
-		const depth = queue_item.depth;
+		const { path: new_path, depth } = queue.shift()!;
 		
 		console.info(`Processing queue item at depth ${depth}`);
 		
