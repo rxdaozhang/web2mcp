@@ -22,6 +22,7 @@ interface ClickableElement {
 	text: string;
 	href?: string;
 	description: string;
+	url?: string; // URL after clicking this element
 }
 
 interface TableData {
@@ -59,6 +60,31 @@ interface FormData {
 function page_hash(url: string): string {
 	// Simple hash function for URL - lowercase and hash
 	return crypto.createHash('md5').update(url.toLowerCase()).digest('hex');
+}
+
+function canonicalizeUrl(url: string): string {
+	// Remove trailing slashes, convert to lowercase, and remove common query parameters
+	let canonical = url.toLowerCase().trim();
+	
+	// Remove trailing slash
+	if (canonical.endsWith('/')) {
+		canonical = canonical.slice(0, -1);
+	}
+	
+	// Remove common query parameters that don't affect the page content
+	const urlObj = new URL(canonical);
+	const paramsToRemove = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref', 'source'];
+	
+	paramsToRemove.forEach(param => {
+		urlObj.searchParams.delete(param);
+	});
+	
+	// If no path, ensure we have at least '/'
+	if (urlObj.pathname === '') {
+		urlObj.pathname = '/';
+	}
+	
+	return urlObj.toString();
 }
 
 
@@ -611,7 +637,10 @@ async function testNavigationAndModals(stagehand: Stagehand, clickableElements: 
 				
 				if (newUrl !== currentUrl) {
 					console.info(`✓ Navigation detected: ${currentUrl} → ${newUrl}`);
-					navigationElements.push(element);
+					navigationElements.push({
+						...element,
+						url: newUrl
+					});
 					
 					// Go back to original page for next test
 					await navigate_to_page(stagehand, currentUrl, []);
@@ -731,11 +760,12 @@ async function main() {
 	}];
 	
 	let current_path: PathObject[] = initial_path;
-	const rootPathHash = page_hash(JSON.stringify(initial_path));
-	const seen_set = new Set([rootPathHash]);
+	const canonicalRootUrl = canonicalizeUrl(rootUrl);
+	const rootUrlHash = page_hash(canonicalRootUrl);
+	const seenSet = new Set([rootUrlHash]);
 	
 	console.info(`Root page URL: ${rootUrl}`);
-	console.info(`Initial seen set: ${Array.from(seen_set)}`);
+	console.info(`Initial seen set: ${Array.from(seenSet)}`);
 	const crud_operations: any[] = [];
 	
 	// Main crawling loop
@@ -861,16 +891,19 @@ async function main() {
 					is_new_link: true
 				}];
 				
-				// Create a hash for the new path to avoid duplicates
-				const pathHash = page_hash(JSON.stringify(newPath));
+				// Use the URL from the navigation element
+				const canonicalUrl = canonicalizeUrl(element.url!);
+				const urlHash = page_hash(canonicalUrl);
 				
-				if (!seen_set.has(pathHash)) {
-					seen_set.add(pathHash);
+				if (!seenSet.has(urlHash)) {
+					seenSet.add(urlHash);
 					queue.unshift({
 						path: newPath,
 						depth: depth + 1
 					});
-					console.info(`Added new path to queue: ${element.text} (${element.selector})`);
+					console.info(`Added new path to queue: ${element.text} (${element.selector}) -> ${canonicalUrl}`);
+				} else {
+					console.info(`Skipping duplicate URL: ${canonicalUrl}`);
 				}
 			}
 		}
