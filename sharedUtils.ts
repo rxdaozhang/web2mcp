@@ -52,6 +52,13 @@ export async function initializeStagehand(config: StagehandConfig, suppressLogs:
 		);
 	}
 
+	// Set up file chooser handler to prevent file dialogs from blocking the crawler
+	page.on('filechooser', async (fileChooser: any) => {
+	console.log('File chooser opened - automatically closing with empty file');
+	// Set an empty file array to close the dialog without actually uploading anything
+	await fileChooser.setFiles([]);
+	});
+
 	return { stagehand, page };
 }
 

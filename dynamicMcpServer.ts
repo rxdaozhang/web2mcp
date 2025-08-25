@@ -395,9 +395,11 @@ ${this.pageActions.map((action, index) => `${index}: ${JSON.stringify(action, nu
         ${inputContext}
 
         ${inputContext != NO_INPUTS_STR ? 'You MUST click submit/complete the requested action. Do NOT ask for further permission.' : ''}
+        
+        If you run into issues, then you MUST find the buttons on the screen to solve those issues - do NOT ask for permission.
 
         ${pageAction.operation.toLowerCase() == 'read' ? 'Return the requested information.' : 'Return whether the request action was successful.'}`,
-          maxSteps: 30
+          maxSteps: 60
         });
         
         actionResult = JSON.stringify(agentResponse);

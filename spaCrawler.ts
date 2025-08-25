@@ -673,16 +673,25 @@ async function testNavigationAndModals(stagehand: Stagehand, clickableElements: 
 							operation: 'MODAL_INTERACTION'
 						});
 						
-						// Try to close the modal
-						const closeButtons = await stagehand.page.observe({
-							instruction: "Find close buttons, X buttons, or cancel buttons in the modal to close it."
+						// Use Browserbase's agent capability to close the modal
+						const agent = stagehand.agent({
+							provider: "openai",
+							instructions: 'You are a helpful assistant that can use a web browser.',
+							model: "computer-use-preview",
+							options: {
+								apiKey: process.env.OPENAI_API_KEY || "your-openai-key"
+							},
 						});
-						
-						if (closeButtons.length > 0) {
-							await stagehand.page.act(`Click on the element with selector "${closeButtons[0].selector}"`);
-							await stagehand.page.waitForTimeout(1000);
-						} else {
-							// Try pressing Escape key
+
+						try {
+							const agentResponse = await agent.execute({
+								instruction: `Close the modal that is open on the screen. Look for and click on any close button, X button, cancel button, or similar element that will close the modal. If you can't find a close button, try pressing the Escape key. Return whether the modal was successfully closed.`,
+								maxSteps: 10
+							});
+							console.info(`Modal close attempt result: ${agentResponse}`);
+						} catch (error) {
+							console.error('Error using agent to close modal:', error);
+							// Fallback to Escape key
 							await stagehand.page.keyboard.press('Escape');
 							await stagehand.page.waitForTimeout(1000);
 						}
