@@ -1,41 +1,30 @@
 {
   "server": {
-    "name": "email-mcp-server",
+    "name": "email-webapp-mcp-server",
     "version": "0.1.0"
   },
   "tools": [
     {
       "name": "list_emails",
-      "description": "List emails with optional filters",
+      "description": "List emails with optional text search and starred-only filter",
       "input_schema": {
         "type": "object",
         "properties": {
-          "starred": { "type": "boolean", "description": "If true, return only starred emails; if omitted or false, return all emails" }
+          "query": { "type": "string", "description": "Search query to filter emails by subject or body" },
+          "starred": { "type": "boolean", "description": "If true, return only starred emails" }
         },
         "required": [],
         "additionalProperties": false
       }
     },
     {
-      "name": "search_emails",
-      "description": "Search emails by text query",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "query": { "type": "string", "description": "Search query text" }
-        },
-        "required": ["query"],
-        "additionalProperties": false
-      }
-    },
-    {
       "name": "send_email",
-      "description": "Send an email",
+      "description": "Compose and send a new email",
       "input_schema": {
         "type": "object",
         "properties": {
           "subject": { "type": "string", "description": "Email subject" },
-          "body": { "type": "string", "description": "Email body text" }
+          "body": { "type": "string", "description": "Email body content" }
         },
         "required": ["subject", "body"],
         "additionalProperties": false

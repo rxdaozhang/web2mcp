@@ -785,8 +785,10 @@ async function main() {
 					type: input.type,
 					required: input.required,
 					placeholder: input.placeholder,
-					label: input.label || input.description,
-					options: input.options
+					label: input.label,
+					options: input.options,
+					description: input.description,
+					selector: input.selector
 				})),
 				textContent: form.textContent.substring(0, 200) + (form.textContent.length > 200 ? '...' : ''),
 				path: current_path
@@ -839,8 +841,10 @@ async function main() {
 						type: input.type,
 						required: input.required,
 						placeholder: input.placeholder,
-						label: input.label || input.description,
-						options: input.options
+						label: input.label,
+						options: input.options,
+						description: input.description,
+						selector: input.selector
 					})),
 					textContent: form.textContent.substring(0, 200) + (form.textContent.length > 200 ? '...' : ''),
 					path: modalPath

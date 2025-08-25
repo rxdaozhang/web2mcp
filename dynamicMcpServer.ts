@@ -38,6 +38,8 @@ interface ServerConfig {
   tools: ToolConfig[];
 }
 
+const NO_INPUTS_STR = 'No inputs available.'
+
 // Types for page actions
 
 interface PageAction {
@@ -53,6 +55,8 @@ interface PageAction {
     label: string;
     placeholder?: string;
     options?: string[];
+    description: string;
+    selector: string;
   }>;
   textContent: string;
   path: PathObject[];
@@ -240,7 +244,7 @@ ${this.pageActions.map((action, index) => `${index}: ${JSON.stringify(action, nu
     // Execute the page action if a valid index was found
     if (selectedIndex !== null) {
       try {
-        const executionResult = await this.executePageAction(selectedIndex);
+        const executionResult = await this.executePageAction(selectedIndex, toolConfig, args);
         return {
           ok: true,
           name,
@@ -333,7 +337,7 @@ ${this.pageActions.map((action, index) => `${index}: ${JSON.stringify(action, nu
   }
 
   // Execute a page action using Stagehand
-  async executePageAction(pageActionIndex: number): Promise<any> {
+  async executePageAction(pageActionIndex: number, toolConfig: ToolConfig, args?: Record<string, unknown>): Promise<any> {
     if (pageActionIndex < 0 || pageActionIndex >= this.pageActions.length) {
       throw new Error(`Invalid page action index: ${pageActionIndex}`);
     }
@@ -355,14 +359,58 @@ ${this.pageActions.map((action, index) => `${index}: ${JSON.stringify(action, nu
         await navigate_to_page(stagehand, rootUrl, pageAction.path);
       }
       
-      // TODO: Implement the actual action based on the pageAction.operation
-      // This would involve interacting with forms, clicking elements, etc.
+      // Use the tool configuration passed from universalHandler
+      
+      // Build input context from page action inputs
+      const inputContext = pageAction.inputs ? pageAction.inputs.map(input => 
+        `- ${input.description} (selector: ${input.selector})`
+      ).join('\n') : NO_INPUTS_STR;
+      
+      // Use Browserbase's agent capability to handle form interactions and actions
+      const agent = stagehand.agent({
+        provider: "openai",
+        instructions: 'You are a helpful assistant that can use a web browser.',
+        model: "computer-use-preview",
+        options: {
+          apiKey: process.env.OPENAI_API_KEY || "your-openai-key"
+        },
+      });
+
+      let actionResult = "";
+      try {
+        const agentResponse = await agent.execute({
+          instruction: `You will be executing the following task:
+        
+        Task: ${toolConfig.name}
+        Description: ${toolConfig.description}
+        
+        ${args && Object.keys(args).length > 0 ? `Arguments provided:
+        ${Object.entries(args).map(([key, value]) => `  ${key} = ${JSON.stringify(value)}`).join('\n')}` : 'No arguments provided'}
+        
+        Page action details:
+        - Operation: ${pageAction.operation}
+        - Description: ${pageAction.textContent}
+        
+        Available inputs that might be related to this task:
+        ${inputContext}
+
+        ${inputContext != NO_INPUTS_STR ? 'You MUST click submit/complete the requested action. Do NOT ask for further permission.' : ''}
+
+        ${pageAction.operation.toLowerCase() == 'read' ? 'Return the requested information.' : 'Return whether the request action was successful.'}`,
+          maxSteps: 30
+        });
+        
+        actionResult = JSON.stringify(agentResponse);
+      } catch (agentError) {
+        console.error('Agent execution error:', agentError);
+        actionResult = `Agent execution failed: ${agentError instanceof Error ? agentError.message : 'Unknown error'}`;
+      }
       
       const result = {
         success: true,
         pageAction: pageAction,
         currentUrl: page.url(),
-        message: `Successfully executed ${pageAction.operation} operation for ${pageAction.type}`
+        message: actionResult
       };
       
       console.error('Cleaning up: Closing Stagehand...');
