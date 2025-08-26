@@ -70,6 +70,17 @@ export async function initializeStagehand(config: StagehandConfig, suppressLogs:
  * @param password Password for login
  */
 export async function login(stagehand: Stagehand, url: string, username: string, password: string): Promise<void> {
+	// Check if login should be skipped
+	const skipLogin = process.env.SKIP_LOGIN === "true";
+	if (skipLogin) {
+		console.error("Login skipped - SKIP_LOGIN environment variable is set to true");
+		// Still navigate to the URL but skip the login process
+		await stagehand.page.goto(url);
+		await stagehand.page.waitForTimeout(5000);
+		await stagehand.page.act('Accept any cookies pop-up on the page');
+		return;
+	}
+
 	// TODO: More accurate login detection
 	// TODO: Bot detection circumvention
 	console.error("Starting login process...");

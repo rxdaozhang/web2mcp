@@ -43,7 +43,7 @@ const NO_INPUTS_STR = 'No inputs available.'
 // Types for page actions
 
 interface PageAction {
-  operation: 'READ' | 'CREATE' | 'UPDATE' | 'DELETE';
+  operation: 'READ' | 'CREATE' | 'UPDATE' | 'DELETE' | 'UNSPECIFIED';
   type: string;
   selector: string;
   elementCount: number;
@@ -241,33 +241,23 @@ ${this.pageActions.map((action, index) => `${index}: ${JSON.stringify(action, nu
       selectedIndex = null;
     }
     
-    // Execute the page action if a valid index was found
-    if (selectedIndex !== null) {
-      try {
-        const executionResult = await this.executePageAction(selectedIndex, toolConfig, args);
-        return {
-          ok: true,
-          name,
-          args,
-          selectedPageAction: this.pageActions[selectedIndex],
-          executionResult
-        };
-      } catch (error) {
-        return {
-          ok: false,
-          name,
-          args,
-          error: error instanceof Error ? error.message : 'Unknown error',
-          selectedPageAction: this.pageActions[selectedIndex]
-        };
-      }
-    } else {
-      return { 
-        ok: false,
-        name, 
+    // Execute the page action
+    try {
+      const executionResult = await this.executePageAction(selectedIndex, toolConfig, args);
+      return {
+        ok: true,
+        name,
         args,
-        error: "Could not determine which page action to execute",
-        selectedPageAction: null
+        selectedPageAction: selectedIndex !== null ? this.pageActions[selectedIndex] : null,
+        executionResult
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        name,
+        args,
+        error: error instanceof Error ? error.message : 'Unknown error',
+                  selectedPageAction: selectedIndex !== null ? this.pageActions[selectedIndex] : null
       };
     }
   }
@@ -337,12 +327,24 @@ ${this.pageActions.map((action, index) => `${index}: ${JSON.stringify(action, nu
   }
 
   // Execute a page action using Stagehand
-  async executePageAction(pageActionIndex: number, toolConfig: ToolConfig, args?: Record<string, unknown>): Promise<any> {
-    if (pageActionIndex < 0 || pageActionIndex >= this.pageActions.length) {
+  async executePageAction(pageActionIndex: number | null, toolConfig: ToolConfig, args?: Record<string, unknown>): Promise<any> {
+    let pageAction: PageAction;
+    
+    if (pageActionIndex === null) {
+      // Default page action when no specific action is determined
+      pageAction = {
+        operation: 'UNSPECIFIED',
+        type: 'default',
+        selector: 'body',
+        elementCount: 1,
+        textContent: `${toolConfig.name}: ${toolConfig.description}`,
+        path: []
+      };
+    } else if (pageActionIndex < 0 || pageActionIndex >= this.pageActions.length) {
       throw new Error(`Invalid page action index: ${pageActionIndex}`);
+    } else {
+      pageAction = this.pageActions[pageActionIndex];
     }
-
-    const pageAction = this.pageActions[pageActionIndex];
     console.error(`Starting browser automation for: ${pageAction.operation} - ${pageAction.type}`);
 
     try {
