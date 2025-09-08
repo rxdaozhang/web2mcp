@@ -39,8 +39,8 @@ jobs:
             "log": true,
             "NON_INTERACTIVE_MODE": true,
             "OPENAI_API_KEY": "${{ secrets.OPENAI_API_KEY }}",
-            "OPENAI_BASE_URL": "https://api.deepseek.com",
-            "OPENAI_MODEL": "deepseek-chat"
+            "OPENAI_BASE_URL": "https://openrouter.ai/api/v1/chat/completions",
+            "OPENAI_MODEL": "openrouter/sonoma-sky-alpha"
           }
           EOF
         shell: bash
